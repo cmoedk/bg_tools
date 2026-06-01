@@ -17,12 +17,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = process.cwd();
 const GENERATE_DIR = path.join(__dirname, '..', 'generate'); // bg_tools' own generator scripts
+const TEMPLATES_DIR = path.join(__dirname, '..', '..', 'templates'); // bg_tools' starter templates
 const IMAGE_PATH_FILE = path.join(PROJECT_ROOT, 'image_path.txt');
 const UI_DIR = path.join(__dirname, 'ui');
 const DIST_DIR = path.join(PROJECT_ROOT, '_dist'); // generators write their output here
 
-// ---------- Config (mirrors menu.mjs) ----------
-const ROOTFOLDERS = ['3_test', '4_playtest', '5_prototype'];
+// ---------- Design-system status folders ----------
+// Projects live in one of these folders, in this order. A project is "promoted"
+// from one folder to the next (see planPromotion). In 1_idea a project is a single
+// `<name>.idea.md` file; in every later folder it is a `<name>/` subfolder.
+const STATUS_FOLDERS = [
+    { key: '1_idea', label: 'Idea', kind: 'file' },
+    { key: '2_draft', label: 'Draft', kind: 'folder' },
+    { key: '3_test', label: 'Test', kind: 'folder' },
+    { key: '4_playtest', label: 'Playtest', kind: 'folder' },
+    { key: '5_prototype', label: 'Prototype', kind: 'folder' },
+    { key: '6_production', label: 'Production', kind: 'folder' },
+    { key: '7_archive', label: 'Archive', kind: 'folder' },
+];
+const STATUS_BY_KEY = new Map(STATUS_FOLDERS.map(f => [f.key, f]));
+// Generators only make sense once a game has component files (from 3_test onward).
+const GENERATE_FOLDERS = new Set(['3_test', '4_playtest', '5_prototype']);
+// Safe working-title / filename: starts alphanumeric, then word chars, space, _, -, .
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _\-.]*$/;
+// Editable file extensions for the inline editor.
+const EDITABLE_EXT = new Set(['.md', '.json5', '.txt', '.html', '.css']);
+const KIND_BY_EXT = { '.md': 'markdown', '.json5': 'json5', '.txt': 'text', '.html': 'html', '.css': 'css' };
+// Parses a versioned rules filename: <base>_rules_<version>.<stage>.md
+const RULES_RE = /^(.*)_rules_([0-9][0-9.]*)\.(test|playtest|prototype|production)\.md$/i;
+const DRAFT_RULES_RE = /^(.*)_rules\.draft\.md$/i;
+
 const MENU_OPTIONS = [
     {
         label: 'Generate rules HTML',
@@ -63,7 +87,7 @@ const MENU_OPTIONS = [
 
 const PORT = Number(process.env.MENU_PORT) || 4599;
 
-// ---------- Helpers ----------
+// ---------- Image path ----------
 async function readImagePath() {
     try {
         const data = await fs.readFile(IMAGE_PATH_FILE, 'utf-8');
@@ -80,20 +104,345 @@ async function readImagePath() {
     }
 }
 
-async function getFolderOptions() {
-    const options = [];
-    for (const root of ROOTFOLDERS) {
-        const fullRootPath = path.join(PROJECT_ROOT, root);
-        if (!existsSync(fullRootPath)) continue;
-        const subdirs = (await fs.readdir(fullRootPath, { withFileTypes: true }))
-            .filter(d => d.isDirectory())
-            .map(d => ({ name: d.name, relPath: path.join(root, d.name), root }));
-        options.push(...subdirs);
+// ---------- Project model ----------
+// A project id is "<status>/<name>" (forward slash, URL-safe). resolveProject
+// validates it and returns the absolute locations it maps to.
+function resolveProject(id) {
+    if (typeof id !== 'string') return null;
+    const parts = id.split('/');
+    if (parts.length !== 2) return null;
+    const [status, name] = parts;
+    const meta = STATUS_BY_KEY.get(status);
+    if (!meta) return null;
+    if (!NAME_RE.test(name) || name.includes('..')) return null;
+    const statusDir = path.join(PROJECT_ROOT, status);
+    if (meta.kind === 'file') {
+        return {
+            id: `${status}/${name}`,
+            relPath: path.join(status, name),
+            status, name, kind: 'file',
+            statusDir,
+            folderDir: null,
+            ideaFile: path.join(statusDir, `${name}.idea.md`),
+            ideaRel: `${name}.idea.md`,
+            canGenerate: GENERATE_FOLDERS.has(status),
+        };
     }
-    return options;
+    const folderDir = path.join(statusDir, name);
+    return {
+        id: `${status}/${name}`,
+        relPath: path.join(status, name),
+        status, name, kind: 'folder',
+        statusDir,
+        folderDir,
+        canGenerate: GENERATE_FOLDERS.has(status),
+    };
 }
 
-// Recursively collect *.pdf files under DIST_DIR as a Map(absPath -> { mtimeMs, size }).
+// List all projects, grouped by status folder.
+async function listProjects() {
+    const folders = [];
+    for (const meta of STATUS_FOLDERS) {
+        const dir = path.join(PROJECT_ROOT, meta.key);
+        const projects = [];
+        let entries = [];
+        try {
+            entries = await fs.readdir(dir, { withFileTypes: true });
+        } catch { /* status folder may not exist */ }
+        if (meta.kind === 'file') {
+            for (const e of entries) {
+                if (e.isFile() && /\.idea\.md$/i.test(e.name)) {
+                    const name = e.name.replace(/\.idea\.md$/i, '');
+                    if (NAME_RE.test(name)) projects.push({ id: `${meta.key}/${name}`, name, status: meta.key });
+                }
+            }
+        } else {
+            for (const e of entries) {
+                if (e.isDirectory() && NAME_RE.test(e.name)) {
+                    projects.push({ id: `${meta.key}/${e.name}`, name: e.name, status: meta.key });
+                }
+            }
+        }
+        projects.sort((a, b) => a.name.localeCompare(b.name));
+        folders.push({
+            key: meta.key, label: meta.label, kind: meta.kind,
+            canGenerate: GENERATE_FOLDERS.has(meta.key),
+            projects,
+        });
+    }
+    return { folders };
+}
+
+// List the editable files belonging to a project.
+async function listProjectFiles(project) {
+    const files = [];
+    if (project.kind === 'file') {
+        if (existsSync(project.ideaFile)) {
+            files.push({ path: project.ideaRel, kind: 'markdown', group: 'text', default: true });
+        }
+        return files;
+    }
+    // Text files directly in the project folder
+    let entries = [];
+    try {
+        entries = await fs.readdir(project.folderDir, { withFileTypes: true });
+    } catch { return files; }
+    for (const e of entries) {
+        if (!e.isFile()) continue;
+        const ext = path.extname(e.name).toLowerCase();
+        if (!EDITABLE_EXT.has(ext) || ext === '.html' || ext === '.css') continue;
+        files.push({ path: e.name, kind: KIND_BY_EXT[ext], group: 'text', default: false });
+    }
+    // Card templates in design/
+    try {
+        const designEntries = await fs.readdir(path.join(project.folderDir, 'design'), { withFileTypes: true });
+        for (const e of designEntries) {
+            if (!e.isFile()) continue;
+            const ext = path.extname(e.name).toLowerCase();
+            if (ext === '.html' || ext === '.css') {
+                files.push({ path: `design/${e.name}`, kind: KIND_BY_EXT[ext], group: 'template', default: false });
+            }
+        }
+    } catch { /* no design dir */ }
+    // Default file: the rules markdown, else the first markdown, else the first file.
+    const rules = files.find(f => f.group === 'text' && /rules/i.test(f.path) && f.kind === 'markdown');
+    const def = rules || files.find(f => f.kind === 'markdown') || files[0];
+    if (def) def.default = true;
+    files.sort((a, b) => (a.group === b.group ? a.path.localeCompare(b.path) : a.group === 'text' ? -1 : 1));
+    return files;
+}
+
+// Resolve & validate a file path within a project; returns absolute path or null.
+function resolveProjectFile(project, relPath) {
+    if (typeof relPath !== 'string' || !relPath || relPath.includes('..')) return null;
+    const ext = path.extname(relPath).toLowerCase();
+    if (!EDITABLE_EXT.has(ext)) return null;
+    if (project.kind === 'file') {
+        // Only the idea file itself is editable for an idea project.
+        if (relPath !== project.ideaRel) return null;
+        return project.ideaFile;
+    }
+    const abs = path.join(project.folderDir, relPath);
+    if (abs !== project.folderDir && !abs.startsWith(project.folderDir + path.sep)) return null;
+    return abs;
+}
+
+// ---------- Scaffolding (Add Project) ----------
+function formatDate(d) {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+    return `${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function notesSeed(title) {
+    return `# ${title} — Notes\n\n## ${formatDate(new Date())}\n\n- \n`;
+}
+
+function infoSeed(title) {
+    return `# ${title} — Info\n\n` +
+        `- **Release title:** ${title}\n` +
+        `- **Player count:** \n` +
+        `- **Player age:** \n` +
+        `- **Game type:** \n` +
+        `- **Game mechanisms:** \n` +
+        `- **Estimated game time:** \n\n` +
+        `## Pitch\n\n\n## Why does this game exist?\n\n\n## Why is this game interesting for a publisher?\n\n`;
+}
+
+async function changelogSeed(title) {
+    try {
+        const tpl = await fs.readFile(path.join(TEMPLATES_DIR, '_template.changelog.md'), 'utf-8');
+        return tpl.replace(/\[working_title\]/g, title);
+    } catch {
+        return `# Changelog for ${title}\n\n## Version 0.0.1 (${formatDate(new Date())})\n\n- RULE: Initial rules.\n`;
+    }
+}
+
+// Create the starting files for a new project at the given status.
+async function scaffoldProject(status, title) {
+    const meta = STATUS_BY_KEY.get(status);
+    if (!meta) throw httpError(400, 'Unknown status folder.');
+    if (!NAME_RE.test(title) || title.includes('..')) {
+        throw httpError(400, 'Title must start with a letter or number and contain only letters, numbers, spaces, _ , - or .');
+    }
+    const statusDir = path.join(PROJECT_ROOT, status);
+
+    if (meta.kind === 'file') {
+        const file = path.join(statusDir, `${title}.idea.md`);
+        if (existsSync(file)) throw httpError(409, 'A project with that name already exists.');
+        await fs.mkdir(statusDir, { recursive: true });
+        await fs.writeFile(file, `# ${title}\n\n`, 'utf-8');
+        return `${status}/${title}`;
+    }
+
+    const dir = path.join(statusDir, title);
+    if (existsSync(dir)) throw httpError(409, 'A project with that name already exists.');
+    await fs.mkdir(dir, { recursive: true });
+
+    const write = (name, content) => fs.writeFile(path.join(dir, name), content, 'utf-8');
+    switch (status) {
+        case '2_draft':
+            await write(`${title}_rules.draft.md`, `# ${title}\n\n_Draft rules._\n`);
+            await write(`${title}.notes.md`, notesSeed(title));
+            break;
+        case '3_test':
+            await write(`${title}_rules_0.0.1.test.md`, `# ${title}\n`);
+            await write(`${title}.notes.md`, notesSeed(title));
+            await write(`${title}.changelog.md`, await changelogSeed(title));
+            break;
+        case '4_playtest':
+            await write(`${title}_rules_0.1.playtest.md`, `# ${title}\n`);
+            await write(`${title}.notes.md`, notesSeed(title));
+            await write(`${title}.changelog.md`, await changelogSeed(title));
+            break;
+        case '5_prototype':
+            await write(`${title}_rules_0.1.prototype.md`, `# ${title}\n`);
+            await write(`${title}.notes.md`, notesSeed(title));
+            await write(`${title}.changelog.md`, await changelogSeed(title));
+            await write(`${title}.info.md`, infoSeed(title));
+            break;
+        case '6_production':
+            await write(`${title}_rules_0.1.production.md`, `# ${title}\n`);
+            await write(`${title}.notes.md`, notesSeed(title));
+            await write(`${title}.changelog.md`, await changelogSeed(title));
+            await write(`${title}.info.md`, infoSeed(title));
+            break;
+        case '7_archive':
+            // Discarded games: just the (named) folder.
+            break;
+    }
+    return `${status}/${title}`;
+}
+
+// ---------- Promotion ----------
+function nextStatusKey(status) {
+    const i = STATUS_FOLDERS.findIndex(f => f.key === status);
+    return i >= 0 && i < STATUS_FOLDERS.length - 1 ? STATUS_FOLDERS[i + 1].key : null;
+}
+
+const relToRoot = (abs) => path.relative(PROJECT_ROOT, abs).replace(/\\/g, '/');
+
+// Build an ordered promotion plan. Returns { from, to, ops, needs, blocked }.
+// ops: { type: 'mkdir'|'move'|'rename'|'create', from?, to?, abs*, content?, desc }.
+async function planPromotion(project, { releaseTitle } = {}) {
+    const from = project.status;
+    const to = nextStatusKey(from);
+    if (!to) return { from, to: null, ops: [], needs: [], blocked: 'Archived projects cannot be promoted.' };
+
+    const name = project.name;
+    const ops = [];
+    const needs = [];
+
+    // 1_idea (file) -> 2_draft (folder)
+    if (from === '1_idea') {
+        if (!existsSync(project.ideaFile)) return { from, to, ops: [], needs: [], blocked: 'Idea file is missing.' };
+        const targetDir = path.join(PROJECT_ROOT, to, name);
+        if (existsSync(targetDir)) return { from, to, ops: [], needs: [], blocked: `${to}/${name} already exists.` };
+        ops.push({ type: 'mkdir', abs: targetDir, desc: `Create folder ${to}/${name}/` });
+        ops.push({
+            type: 'move', absFrom: project.ideaFile, absTo: path.join(targetDir, `${name}.notes.md`),
+            desc: `Move ${relToRoot(project.ideaFile)} → ${to}/${name}/${name}.notes.md`,
+        });
+        ops.push({
+            type: 'create', abs: path.join(targetDir, `${name}_rules.draft.md`), content: `# ${name}\n\n_Draft rules._\n`,
+            desc: `Create ${to}/${name}/${name}_rules.draft.md`,
+        });
+        return { from, to, ops, needs };
+    }
+
+    // Folder-based promotions: validate the source folder exists.
+    if (!existsSync(project.folderDir)) return { from, to, ops: [], needs: [], blocked: 'Project folder is missing.' };
+
+    const newName = (from === '5_prototype') ? (releaseTitle && releaseTitle.trim() ? releaseTitle.trim() : name) : name;
+    if (from === '5_prototype') {
+        needs.push({ field: 'releaseTitle', label: 'Release title', default: name });
+        if (!NAME_RE.test(newName) || newName.includes('..')) {
+            return { from, to, ops: [], needs, blocked: 'Invalid release title.' };
+        }
+    }
+    const targetDir = path.join(PROJECT_ROOT, to, newName);
+    if (existsSync(targetDir)) return { from, to, ops, needs, blocked: `${to}/${newName} already exists.` };
+
+    // Move the whole folder first; subsequent renames operate on the moved location.
+    ops.push({
+        type: 'move', absFrom: project.folderDir, absTo: targetDir,
+        desc: `Move ${from}/${name}/ → ${to}/${newName}/`,
+    });
+
+    const entries = (await fs.readdir(project.folderDir, { withFileTypes: true })).filter(e => e.isFile()).map(e => e.name);
+    const findRules = (re) => entries.find(n => re.test(n));
+
+    if (from === '2_draft') {
+        const draft = findRules(DRAFT_RULES_RE);
+        if (draft) {
+            ops.push({
+                type: 'rename', absFrom: path.join(targetDir, draft), absTo: path.join(targetDir, `${name}_rules_0.0.1.test.md`),
+                desc: `Rename ${draft} → ${name}_rules_0.0.1.test.md`,
+            });
+        }
+        if (!entries.some(n => /\.changelog\.md$/i.test(n))) {
+            ops.push({
+                type: 'create', abs: path.join(targetDir, `${name}.changelog.md`), content: await changelogSeed(name),
+                desc: `Create ${name}.changelog.md`,
+            });
+        }
+    } else if (from === '3_test') {
+        const rules = findRules(/_rules_[0-9.]+\.test\.md$/i);
+        if (rules) {
+            ops.push({
+                type: 'rename', absFrom: path.join(targetDir, rules), absTo: path.join(targetDir, `${name}_rules_0.1.playtest.md`),
+                desc: `Rename ${rules} → ${name}_rules_0.1.playtest.md`,
+            });
+        }
+    } else if (from === '4_playtest') {
+        const rules = findRules(/_rules_([0-9.]+)\.playtest\.md$/i);
+        if (rules) {
+            const ver = rules.match(/_rules_([0-9.]+)\.playtest\.md$/i)[1];
+            ops.push({
+                type: 'rename', absFrom: path.join(targetDir, rules), absTo: path.join(targetDir, `${name}_rules_${ver}.prototype.md`),
+                desc: `Rename ${rules} → ${name}_rules_${ver}.prototype.md`,
+            });
+        }
+        if (!entries.some(n => /\.info\.md$/i.test(n))) {
+            ops.push({
+                type: 'create', abs: path.join(targetDir, `${name}.info.md`), content: infoSeed(name),
+                desc: `Create ${name}.info.md`,
+            });
+        }
+    } else if (from === '5_prototype') {
+        // Rename every file that starts with the working title to the release title;
+        // the rules file also switches its stage suffix to .production.md.
+        for (const fn of entries) {
+            if (fn !== name && !fn.startsWith(`${name}.`) && !fn.startsWith(`${name}_`)) continue;
+            let renamed = newName + fn.slice(name.length);
+            renamed = renamed.replace(/_rules_([0-9.]+)\.prototype\.md$/i, '_rules_$1.production.md');
+            if (renamed !== fn) {
+                ops.push({
+                    type: 'rename', absFrom: path.join(targetDir, fn), absTo: path.join(targetDir, renamed),
+                    desc: `Rename ${fn} → ${renamed}`,
+                });
+            }
+        }
+    }
+    // 6_production -> 7_archive: move only (no renames).
+
+    return { from, to, ops, needs };
+}
+
+async function executePromotion(plan) {
+    for (const op of plan.ops) {
+        if (op.type === 'mkdir') {
+            await fs.mkdir(op.abs, { recursive: true });
+        } else if (op.type === 'move' || op.type === 'rename') {
+            await fs.mkdir(path.dirname(op.absTo), { recursive: true });
+            await fs.rename(op.absFrom, op.absTo);
+        } else if (op.type === 'create') {
+            if (!existsSync(op.abs)) await fs.writeFile(op.abs, op.content ?? '', 'utf-8');
+        }
+    }
+}
+
+// ---------- Generated-PDF tracking ----------
 async function scanPdfs() {
     const found = new Map();
     async function walk(dir) {
@@ -101,7 +450,7 @@ async function scanPdfs() {
         try {
             entries = await fs.readdir(dir, { withFileTypes: true });
         } catch {
-            return; // dir doesn't exist yet
+            return;
         }
         for (const entry of entries) {
             const full = path.join(dir, entry.name);
@@ -119,7 +468,6 @@ async function scanPdfs() {
     return found;
 }
 
-// Compare two scans; return descriptors for PDFs that are new or were modified.
 function diffPdfs(before, after) {
     const results = [];
     for (const [full, info] of after) {
@@ -138,14 +486,12 @@ function diffPdfs(before, after) {
     return results;
 }
 
-// Resolve a folder option by its index in the (stable) getFolderOptions() ordering.
-async function resolveFolder(index) {
-    const folders = await getFolderOptions();
-    return folders[Number(index)] || null;
+// ---------- HTTP helpers ----------
+function httpError(status, message) {
+    const e = new Error(message);
+    e.httpStatus = status;
+    return e;
 }
-
-const TEMPLATE_NAME_RE = /^[\w.\- ]+\.(html|css)$/i;
-const MD_NAME_RE = /^[\w.\- ]+\.md$/i;
 
 function sendJson(res, status, obj) {
     const body = JSON.stringify(obj);
@@ -180,7 +526,6 @@ const MIME = {
 function serveStatic(res, urlPath) {
     const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
     const filePath = path.join(UI_DIR, rel);
-    // Prevent path traversal outside UI_DIR
     if (!filePath.startsWith(UI_DIR)) {
         res.writeHead(403).end('Forbidden');
         return;
@@ -195,7 +540,7 @@ function serveStatic(res, urlPath) {
 }
 
 // ---------- Script runner (Server-Sent Events) ----------
-async function runScriptSSE(res, { optionIndex, folder }) {
+async function runScriptSSE(res, { optionIndex, project }) {
     res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache',
@@ -219,12 +564,11 @@ async function runScriptSSE(res, { optionIndex, folder }) {
         return res.end();
     }
 
-    sse('start', { label: option.label, folder: folder.name });
+    sse('start', { label: option.label, folder: project.name });
 
-    // Snapshot existing PDFs so we can report only the ones this run produces.
     const pdfsBefore = await scanPdfs();
 
-    const child = spawn('node', [option.script, IMAGE_PATH, folder.relPath, folder.name], {
+    const child = spawn('node', [option.script, IMAGE_PATH, project.relPath, project.name], {
         cwd: PROJECT_ROOT,
         env: process.env,
     });
@@ -242,7 +586,6 @@ async function runScriptSSE(res, { optionIndex, folder }) {
         res.end();
     });
 
-    // Kill child if the client disconnects
     res.on('close', () => {
         if (!child.killed) child.kill();
     });
@@ -257,16 +600,15 @@ const server = http.createServer(async (req, res) => {
     const pathname = url.pathname;
 
     try {
-        // --- API ---
+        // --- Config ---
         if (pathname === '/api/config' && req.method === 'GET') {
             const image = await readImagePath();
             IMAGE_PATH = image.path;
-            const folders = await getFolderOptions();
             return sendJson(res, 200, {
                 imagePath: image.path,
                 imagePathValid: image.valid,
-                folders,
-                options: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '' })),
+                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '' })),
+                statusFolders: STATUS_FOLDERS.map(f => ({ ...f, canGenerate: GENERATE_FOLDERS.has(f.key) })),
             });
         }
 
@@ -285,7 +627,105 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, { ok: true, imagePath: IMAGE_PATH });
         }
 
+        // --- Projects ---
+        if (pathname === '/api/projects' && req.method === 'GET') {
+            return sendJson(res, 200, await listProjects());
+        }
+
+        if (pathname === '/api/project-files' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const files = await listProjectFiles(project);
+            return sendJson(res, 200, { id: project.id, name: project.name, status: project.status, canGenerate: project.canGenerate, files });
+        }
+
+        if (pathname === '/api/add-project' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const id = await scaffoldProject((body.status || '').trim(), (body.title || '').trim());
+            return sendJson(res, 200, { ok: true, id });
+        }
+
+        if (pathname === '/api/promote-preview' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const plan = await planPromotion(project, { releaseTitle: url.searchParams.get('releaseTitle') || '' });
+            return sendJson(res, 200, {
+                from: plan.from, to: plan.to, needs: plan.needs, blocked: plan.blocked || null,
+                ops: plan.ops.map(o => ({ type: o.type, desc: o.desc })),
+            });
+        }
+
+        if (pathname === '/api/promote' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const plan = await planPromotion(project, { releaseTitle: (body.releaseTitle || '').trim() });
+            if (plan.blocked) return sendJson(res, 409, { error: plan.blocked });
+            if (!plan.to || !plan.ops.length) return sendJson(res, 400, { error: 'Nothing to promote.' });
+            await executePromotion(plan);
+            // Derive the new id from the move op's destination.
+            const moveOp = plan.ops.find(o => o.type === 'move');
+            const newName = moveOp ? path.basename(plan.from === '1_idea' ? path.dirname(moveOp.absTo) : moveOp.absTo) : project.name;
+            return sendJson(res, 200, { ok: true, id: `${plan.to}/${newName}`, from: plan.from, to: plan.to });
+        }
+
+        // --- File editor (generalized) ---
+        if (pathname === '/api/file' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const abs = resolveProjectFile(project, url.searchParams.get('path') || '');
+            if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
+            try {
+                const content = await fs.readFile(abs, 'utf-8');
+                return sendJson(res, 200, { path: url.searchParams.get('path'), content });
+            } catch {
+                return sendJson(res, 404, { error: 'File not found.' });
+            }
+        }
+
+        if (pathname === '/api/file' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const abs = resolveProjectFile(project, (body.path || '').trim());
+            if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
+            await fs.mkdir(path.dirname(abs), { recursive: true });
+            await fs.writeFile(abs, body.content ?? '', 'utf-8');
+            return sendJson(res, 200, { ok: true, path: body.path });
+        }
+
+        // Render markdown to a full HTML document (matches the rules HTML generator)
+        if (pathname === '/api/render-markdown' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const html = renderMarkdownDocument(body.content ?? '', body.title || '');
+            return sendJson(res, 200, { html });
+        }
+
+        // Serve files from <project>/design so the live card preview can resolve relative assets.
+        // URL: /api/design-asset/<status>/<name>/<asset...>
+        if (pathname.startsWith('/api/design-asset/') && req.method === 'GET') {
+            const rest = pathname.slice('/api/design-asset/'.length).split('/');
+            if (rest.length < 3) { res.writeHead(404).end('Not found'); return; }
+            const id = `${decodeURIComponent(rest[0])}/${decodeURIComponent(rest[1])}`;
+            const assetRel = rest.slice(2).map(decodeURIComponent).join('/');
+            const project = resolveProject(id);
+            if (!project || project.kind !== 'folder') { res.writeHead(404).end('Not found'); return; }
+            const designDir = path.join(project.folderDir, 'design');
+            const filePath = path.join(designDir, assetRel);
+            if (!filePath.startsWith(designDir) || !existsSync(filePath) || !(await fs.stat(filePath)).isFile()) {
+                res.writeHead(404).end('Not found');
+                return;
+            }
+            const ext = path.extname(filePath).toLowerCase();
+            res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+            return createReadStream(filePath).pipe(res);
+        }
+
+        // --- Run a generator (SSE) ---
         if (pathname === '/api/run' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            if (!project.canGenerate) return sendJson(res, 400, { error: 'Generators are only available for test/playtest/prototype projects.' });
             const image = await readImagePath();
             if (!image.valid) {
                 res.writeHead(400, { 'Content-Type': 'text/event-stream' });
@@ -297,127 +737,7 @@ const server = http.createServer(async (req, res) => {
             }
             IMAGE_PATH = image.path;
             const optionIndex = Number(url.searchParams.get('option'));
-            const folders = await getFolderOptions();
-            const folderIndex = Number(url.searchParams.get('folder'));
-            const folder = folders[folderIndex];
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            return runScriptSSE(res, { optionIndex, folder });
-        }
-
-        // --- Template editor API ---
-        // List templates in <gameFolder>/design
-        if (pathname === '/api/templates' && req.method === 'GET') {
-            const folder = await resolveFolder(url.searchParams.get('folder'));
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            const designDir = path.join(PROJECT_ROOT, folder.relPath, 'design');
-            let templates = [];
-            try {
-                templates = (await fs.readdir(designDir, { withFileTypes: true }))
-                    .filter(d => d.isFile() && /\.(html|css)$/i.test(d.name))
-                    .map(d => d.name)
-                    .sort();
-            } catch { /* design dir may not exist yet */ }
-            return sendJson(res, 200, { folder: folder.name, relPath: folder.relPath, templates });
-        }
-
-        // Read a single template's content
-        if (pathname === '/api/template' && req.method === 'GET') {
-            const folder = await resolveFolder(url.searchParams.get('folder'));
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            const name = url.searchParams.get('name') || '';
-            if (!TEMPLATE_NAME_RE.test(name)) return sendJson(res, 400, { error: 'Invalid template name.' });
-            const filePath = path.join(PROJECT_ROOT, folder.relPath, 'design', name);
-            try {
-                const content = await fs.readFile(filePath, 'utf-8');
-                return sendJson(res, 200, { name, content });
-            } catch {
-                return sendJson(res, 404, { error: 'Template not found.' });
-            }
-        }
-
-        // Save (create or overwrite) a template
-        if (pathname === '/api/template' && req.method === 'POST') {
-            const body = JSON.parse(await readBody(req) || '{}');
-            const folder = await resolveFolder(body.folder);
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            const name = (body.name || '').trim();
-            if (!TEMPLATE_NAME_RE.test(name)) {
-                return sendJson(res, 400, { error: 'Name must be a simple filename ending in .html or .css' });
-            }
-            const designDir = path.join(PROJECT_ROOT, folder.relPath, 'design');
-            await fs.mkdir(designDir, { recursive: true });
-            await fs.writeFile(path.join(designDir, name), body.content ?? '', 'utf-8');
-            return sendJson(res, 200, { ok: true, name });
-        }
-
-        // --- Markdown editor API ---
-        // List markdown files directly in the game folder; flag the default (rules) file.
-        if (pathname === '/api/markdown-files' && req.method === 'GET') {
-            const folder = await resolveFolder(url.searchParams.get('folder'));
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            const gameDir = path.join(PROJECT_ROOT, folder.relPath);
-            let files = [];
-            try {
-                files = (await fs.readdir(gameDir, { withFileTypes: true }))
-                    .filter(d => d.isFile() && d.name.toLowerCase().endsWith('.md'))
-                    .map(d => d.name)
-                    .sort();
-            } catch { /* folder may be missing */ }
-            const defaultFile = files.find(f => f.toLowerCase().includes('rules')) || files[0] || null;
-            return sendJson(res, 200, { folder: folder.name, relPath: folder.relPath, files, defaultFile });
-        }
-
-        // Read a markdown file's content
-        if (pathname === '/api/markdown' && req.method === 'GET') {
-            const folder = await resolveFolder(url.searchParams.get('folder'));
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            const name = url.searchParams.get('name') || '';
-            if (!MD_NAME_RE.test(name)) return sendJson(res, 400, { error: 'Invalid markdown name.' });
-            try {
-                const content = await fs.readFile(path.join(PROJECT_ROOT, folder.relPath, name), 'utf-8');
-                return sendJson(res, 200, { name, content });
-            } catch {
-                return sendJson(res, 404, { error: 'Markdown file not found.' });
-            }
-        }
-
-        // Save a markdown file
-        if (pathname === '/api/markdown' && req.method === 'POST') {
-            const body = JSON.parse(await readBody(req) || '{}');
-            const folder = await resolveFolder(body.folder);
-            if (!folder) return sendJson(res, 400, { error: 'Invalid folder.' });
-            const name = (body.name || '').trim();
-            if (!MD_NAME_RE.test(name)) {
-                return sendJson(res, 400, { error: 'Name must be a simple filename ending in .md' });
-            }
-            await fs.writeFile(path.join(PROJECT_ROOT, folder.relPath, name), body.content ?? '', 'utf-8');
-            return sendJson(res, 200, { ok: true, name });
-        }
-
-        // Render markdown to a full HTML document (matches the rules HTML generator)
-        if (pathname === '/api/render-markdown' && req.method === 'POST') {
-            const body = JSON.parse(await readBody(req) || '{}');
-            const html = renderMarkdownDocument(body.content ?? '', body.title || '');
-            return sendJson(res, 200, { html });
-        }
-
-        // Serve files from <gameFolder>/design so the live preview can resolve relative assets
-        if (pathname.startsWith('/api/design-asset/') && req.method === 'GET') {
-            const rest = pathname.slice('/api/design-asset/'.length);
-            const slash = rest.indexOf('/');
-            const folderIndex = slash === -1 ? rest : rest.slice(0, slash);
-            const assetRel = slash === -1 ? '' : decodeURIComponent(rest.slice(slash + 1));
-            const folder = await resolveFolder(folderIndex);
-            if (!folder) { res.writeHead(404).end('Not found'); return; }
-            const designDir = path.join(PROJECT_ROOT, folder.relPath, 'design');
-            const filePath = path.join(designDir, assetRel);
-            if (!filePath.startsWith(designDir) || !existsSync(filePath) || !(await fs.stat(filePath)).isFile()) {
-                res.writeHead(404).end('Not found');
-                return;
-            }
-            const ext = path.extname(filePath).toLowerCase();
-            res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-            return createReadStream(filePath).pipe(res);
+            return runScriptSSE(res, { optionIndex, project });
         }
 
         // --- Serve generated PDFs from _dist ---
@@ -443,7 +763,7 @@ const server = http.createServer(async (req, res) => {
 
         res.writeHead(405).end('Method not allowed');
     } catch (err) {
-        sendJson(res, 500, { error: err.message });
+        sendJson(res, err.httpStatus || 500, { error: err.message });
     }
 });
 
@@ -461,7 +781,6 @@ function start(port, attemptsLeft = 10) {
         const addr = `http://localhost:${port}`;
         console.log(`\nBoard Game Rules menu running at ${addr}`);
         console.log('Press Ctrl+C to stop.\n');
-        // Best-effort: open the default browser (Windows).
         if (process.env.MENU_NO_OPEN !== '1') {
             spawn('cmd', ['/c', 'start', '""', addr], { stdio: 'ignore', detached: true }).unref();
         }

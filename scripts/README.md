@@ -12,9 +12,9 @@ scripts/
     server.mjs           Zero-dependency Node HTTP server: serves the UI + small JSON API,
                          and runs the generators, streaming their output back live (SSE)
     ui/                  The browser UI (plain HTML/CSS/JS, no build step)
-      index.html/app.js  Main menu: pick a project + an action, then Generate
-      templates.*        Card HTML-template editor with live preview
-      markdown.*         Rules markdown editor with live, synced preview
+      index.html/app.js  3-pane workspace: projects (add/promote) | inline file
+                         editor | live preview + generator actions
+      style.css          Shared styles for the workspace, editor and preview
     menu.mjs             Older terminal version of the menu (kept for reference)
     create_image_txt.mjs One-off prompt to create image_path.txt
 

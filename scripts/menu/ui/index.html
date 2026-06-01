@@ -3,64 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Board Game Rules — Menu</title>
+    <title>Board Game Rules — Workspace</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="workspace-body">
     <header>
         <h1>🎲 Board Game Rules</h1>
         <div id="image-path-bar" class="image-path-bar"></div>
     </header>
 
-    <main>
-        <!-- Image path setup (shown when not set/invalid) -->
-        <section id="setup" class="card hidden">
-            <h2>Master image folder</h2>
-            <p class="muted">No valid image folder is set. Enter the full path to the master image folder.</p>
-            <div class="row">
-                <input id="image-path-input" type="text" placeholder="e.g. D:\images\master" autocomplete="off">
-                <button id="save-path-btn">Save</button>
-            </div>
-            <div id="setup-error" class="error"></div>
-        </section>
+    <!-- Three-pane workspace -->
+    <div id="workspace">
+        <!-- LEFT: projects grouped by status folder -->
+        <aside id="projects" class="pane projects-pane">
+            <div id="project-groups"></div>
+        </aside>
 
-        <!-- Main menu -->
-        <section id="menu" class="hidden">
-            <div class="columns">
-                <div class="card">
-                    <h2>Project</h2>
-                    <ul id="folder-list" class="list"></ul>
-                    <p id="no-folders" class="muted hidden">No subfolders found in root folders.</p>
+        <!-- MIDDLE: project info + inline text editor -->
+        <section id="editor" class="pane editor-pane">
+            <div id="editor-empty" class="pane-empty">
+                <p>Select a project on the left, or add one with <strong>+ Add</strong>.</p>
+            </div>
+            <div id="editor-main" class="editor-main hidden">
+                <div class="editor-info">
+                    <span id="project-status" class="status-chip"></span>
+                    <span id="project-name" class="project-name"></span>
                 </div>
-                <div class="card">
-                    <h2>Action</h2>
-                    <ul id="option-list" class="list"></ul>
-                    <p class="muted" id="option-hint">Select a project first.</p>
-                    <button id="edit-markdown-btn" class="ghost full-width" disabled>📝 Edit Markdown</button>
-                    <button id="edit-templates-btn" class="ghost full-width" disabled>🧩 Edit Templates</button>
+                <div class="editor-toolbar">
+                    <select id="file-select" class="select" title="Project files"></select>
+                    <input id="file-name" type="text" class="name-input" placeholder="filename.md" autocomplete="off">
+                    <button id="save-btn">Save</button>
+                    <span id="save-status" class="badge"></span>
                 </div>
+                <textarea id="code" class="code-area" spellcheck="false" placeholder="Select a file…"></textarea>
+                <div id="editor-error" class="error"></div>
             </div>
         </section>
 
-        <!-- Output console -->
-        <section id="console-card" class="card hidden">
-            <div class="console-header">
-                <h2 id="console-title">Output</h2>
-                <div class="console-actions">
-                    <span id="status-badge" class="badge"></span>
-                    <button id="clear-btn" class="ghost hidden">Clear</button>
-                    <button id="stop-btn" class="ghost hidden">Stop</button>
+        <!-- RIGHT: preview + action menu -->
+        <aside id="right" class="pane right-pane">
+            <div class="right-section preview-section">
+                <div class="section-head">
+                    <span>Preview</span>
+                    <span id="preview-note" class="muted preview-base"></span>
+                </div>
+                <div id="preview-host" class="preview-host">
+                    <!-- markdown preview -->
+                    <iframe id="md-preview" class="md-preview-frame hidden" sandbox="allow-same-origin"></iframe>
+                    <!-- card (template) preview, scaled -->
+                    <div id="card-stage" class="preview-stage hidden">
+                        <div id="preview-scaler" class="preview-scaler">
+                            <iframe id="card-preview" class="preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+                        </div>
+                    </div>
+                    <div id="preview-empty" class="pane-empty"><p>No preview for this file type.</p></div>
                 </div>
             </div>
-            <p id="action-description" class="action-description"></p>
-            <button id="generate-btn" class="full-width">Generate</button>
-            <pre id="console" class="console hidden"></pre>
-            <div id="pdf-results" class="pdf-results hidden">
-                <h3>Generated PDFs</h3>
-                <ul id="pdf-list" class="pdf-list"></ul>
+
+            <div class="right-section actions-section">
+                <div class="section-head"><span>Actions</span></div>
+                <ul id="action-list" class="list"></ul>
+                <p id="action-hint" class="muted"></p>
             </div>
-        </section>
-    </main>
+        </aside>
+    </div>
+
+    <!-- Bottom console drawer (shown while a generator runs) -->
+    <section id="console-drawer" class="console-drawer hidden">
+        <div class="console-header">
+            <h2 id="console-title">Output</h2>
+            <div class="console-actions">
+                <span id="run-status" class="badge"></span>
+                <button id="stop-btn" class="ghost hidden">Stop</button>
+                <button id="clear-btn" class="ghost">Clear</button>
+                <button id="close-console-btn" class="ghost">Close</button>
+            </div>
+        </div>
+        <pre id="console" class="console"></pre>
+        <div id="pdf-results" class="pdf-results hidden">
+            <h3>Generated PDFs</h3>
+            <ul id="pdf-list" class="pdf-list"></ul>
+        </div>
+    </section>
+
+    <!-- Reusable modal (Add Project / Promote / Set image path) -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal" role="dialog" aria-modal="true">
+            <h2 id="modal-title">Title</h2>
+            <div id="modal-body" class="modal-body"></div>
+            <div id="modal-error" class="error"></div>
+            <div class="modal-actions">
+                <button id="modal-cancel" class="ghost">Cancel</button>
+                <button id="modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>
