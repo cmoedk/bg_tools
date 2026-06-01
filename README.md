@@ -33,6 +33,26 @@ and `5_prototype/`, and an `image_path.txt` pointing at the master image folder
 See [`scripts/README.md`](scripts/README.md) for the internal layout and the
 generator scripts.
 
+## Quick start for beginners (Windows)
+
+Never used Git, Node, or a terminal? Use the one-click installer:
+
+1. Download [`install.cmd`](install.cmd) (open it on GitHub and click the
+   **Download raw file** button).
+2. Double-click `install.cmd`. If Windows shows a blue
+   *"Windows protected your PC"* box, click **More info → Run anyway**.
+
+The installer will, in one go:
+
+- install **Git**, **Node.js**, and **pnpm** if they are missing (via Windows'
+  built-in `winget`),
+- let you **pick a folder** and name for your project,
+- create that project from the [`example/`](example/) template, and
+- install everything and offer to launch the menu.
+
+Afterwards you just double-click **`run.cmd`** inside your project to open the
+tools again. The manual steps below are for everyone else.
+
 ## Install
 
 ```sh

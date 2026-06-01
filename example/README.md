@@ -37,7 +37,7 @@ render card templates).
 
 ## Use
 
-From the root of this repository:
+From the root of this repository, either **double-click `run.cmd`** or run:
 
 ```sh
 pnpm run tools
