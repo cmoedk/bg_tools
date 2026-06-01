@@ -1,0 +1,11 @@
+{
+  /**
+    cards.text.json5 files are used to generate simple text cards for initial testing of a game.
+  **/
+  c00: "Card Back",
+  c01: [
+    { text: "Card Title", font: "Georgia", fontSize: 140, color: "#aa1111"},
+    { text: "Card Content", font: "monospace", fontSize: 120, color: "#000000"},
+  ],
+  c02: "Card Title. Card Content"
+}

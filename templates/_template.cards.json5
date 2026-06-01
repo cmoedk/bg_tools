@@ -1,0 +1,19 @@
+{
+  /* Batches are created with a name */
+  batch_name: {    
+    _back: "b00", /* Optional shared back for every card in the batch */
+    _backs: {     /* Optional unique backs for specific cards in the batch */
+      b02: "ub02",
+    },
+
+    // _width_mm: 55, /* Optional if different card size than default bridge size */
+    // _height_mm: 88, /* Optional if different card size than default bridge size */
+
+    /* The property names are the same name as the image files. The value is the quantity.
+     * Put any info about the cards in inline comments. 
+     */
+    b01: 2, // Card one | +2 Attack
+    b02: 4, // Card two | +1 Defend
+    b03: 2, // Card three | Special
+  },
+}

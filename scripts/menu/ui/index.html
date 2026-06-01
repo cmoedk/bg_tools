@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Board Game Rules — Menu</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>🎲 Board Game Rules</h1>
+        <div id="image-path-bar" class="image-path-bar"></div>
+    </header>
+
+    <main>
+        <!-- Image path setup (shown when not set/invalid) -->
+        <section id="setup" class="card hidden">
+            <h2>Master image folder</h2>
+            <p class="muted">No valid image folder is set. Enter the full path to the master image folder.</p>
+            <div class="row">
+                <input id="image-path-input" type="text" placeholder="e.g. D:\images\master" autocomplete="off">
+                <button id="save-path-btn">Save</button>
+            </div>
+            <div id="setup-error" class="error"></div>
+        </section>
+
+        <!-- Main menu -->
+        <section id="menu" class="hidden">
+            <div class="columns">
+                <div class="card">
+                    <h2>Project</h2>
+                    <ul id="folder-list" class="list"></ul>
+                    <p id="no-folders" class="muted hidden">No subfolders found in root folders.</p>
+                </div>
+                <div class="card">
+                    <h2>Action</h2>
+                    <ul id="option-list" class="list"></ul>
+                    <p class="muted" id="option-hint">Select a project first.</p>
+                    <button id="edit-markdown-btn" class="ghost full-width" disabled>📝 Edit Markdown</button>
+                    <button id="edit-templates-btn" class="ghost full-width" disabled>🧩 Edit Templates</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Output console -->
+        <section id="console-card" class="card hidden">
+            <div class="console-header">
+                <h2 id="console-title">Output</h2>
+                <div class="console-actions">
+                    <span id="status-badge" class="badge"></span>
+                    <button id="clear-btn" class="ghost hidden">Clear</button>
+                    <button id="stop-btn" class="ghost hidden">Stop</button>
+                </div>
+            </div>
+            <p id="action-description" class="action-description"></p>
+            <button id="generate-btn" class="full-width">Generate</button>
+            <pre id="console" class="console hidden"></pre>
+            <div id="pdf-results" class="pdf-results hidden">
+                <h3>Generated PDFs</h3>
+                <ul id="pdf-list" class="pdf-list"></ul>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

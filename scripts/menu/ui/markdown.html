@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Markdown — Board Game Rules</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="editor-body">
+    <header>
+        <h1>📝 Edit Markdown <span id="folder-name" class="muted"></span></h1>
+        <a href="index.html" class="back-link">← Back to menu</a>
+    </header>
+
+    <div class="split">
+        <!-- Left: editor -->
+        <section class="pane editor-pane">
+            <div class="editor-toolbar">
+                <select id="md-select" class="select"></select>
+                <input id="md-name" type="text" class="name-input" readonly>
+                <button id="save-btn">Save</button>
+                <span id="save-status" class="badge"></span>
+            </div>
+            <textarea id="code" class="code-area" spellcheck="false" placeholder="Select a markdown file…"></textarea>
+            <div id="editor-error" class="error"></div>
+        </section>
+
+        <!-- Right: rendered markdown -->
+        <section class="pane preview-pane md-preview-pane">
+            <iframe id="preview" class="md-preview-frame" sandbox="allow-same-origin"></iframe>
+        </section>
+    </div>
+
+    <script src="markdown.js"></script>
+</body>
+</html>

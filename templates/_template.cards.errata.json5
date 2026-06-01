@@ -1,0 +1,10 @@
+/**
+ * Create an errata file, to only process a subset of the cards in the game.
+ * By default, backs will not be processed, unles explicitly declared.
+ *
+ **/
+
+{
+  cards: "b01 b02 b03", // Optional. Add card ids separated by spaces.
+  backs: "b02",         // Optional. Add card ids separated by spaces.    
+}

@@ -1,0 +1,8 @@
+node_modules/
+
+# Output / runtime files created when the tool runs (these belong to the project
+# being worked on, but can appear here if bg_tools is run standalone).
+_dist/
+image_path.txt
+output.jpg
+*.log
