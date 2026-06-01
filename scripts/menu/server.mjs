@@ -5,6 +5,7 @@ import { existsSync, createReadStream } from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import JSON5 from 'json5';
 import { renderMarkdownDocument } from '../generate/markdownRenderer.mjs';
 
 // ---------- Paths ----------
@@ -210,6 +211,66 @@ async function listProjectFiles(project) {
     if (def) def.default = true;
     files.sort((a, b) => (a.group === b.group ? a.path.localeCompare(b.path) : a.group === 'text' ? -1 : 1));
     return files;
+}
+
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff']);
+
+// Build an overview of a project for the middle "Project View".
+async function projectOverview(project) {
+    let createdMs = null;
+    try {
+        const target = project.kind === 'file' ? project.ideaFile : project.folderDir;
+        const st = await fs.stat(target);
+        createdMs = st.birthtimeMs || st.ctimeMs || st.mtimeMs || null;
+    } catch { /* missing */ }
+
+    // Cards: parse the project's *.cards.json5 and count defined card ids.
+    let cards = null;
+    if (project.kind === 'folder') {
+        try {
+            const entries = await fs.readdir(project.folderDir, { withFileTypes: true });
+            const cardsFile = entries.find(e => e.isFile() && /\.cards\.json5$/i.test(e.name));
+            if (cardsFile) {
+                try {
+                    const data = JSON5.parse(await fs.readFile(path.join(project.folderDir, cardsFile.name), 'utf-8'));
+                    let defined = 0, batches = 0;
+                    for (const v of Object.values(data || {})) {
+                        if (v && typeof v === 'object') {
+                            batches++;
+                            for (const key of Object.keys(v)) if (!key.startsWith('_')) defined++;
+                        }
+                    }
+                    cards = { file: cardsFile.name, defined, batches };
+                } catch {
+                    cards = { file: cardsFile.name, error: true };
+                }
+            }
+        } catch { /* no folder */ }
+    }
+
+    // Images: look for a subfolder named after the project in the master image folder.
+    let images = { configured: false };
+    const img = await readImagePath();
+    if (img.valid) {
+        const dir = path.join(img.path, project.name);
+        try {
+            const st = await fs.stat(dir);
+            if (st.isDirectory()) {
+                const entries = await fs.readdir(dir, { withFileTypes: true });
+                const count = entries.filter(e => e.isFile() && IMAGE_EXT.has(path.extname(e.name).toLowerCase())).length;
+                images = { configured: true, hasFolder: true, count };
+            } else {
+                images = { configured: true, hasFolder: false };
+            }
+        } catch {
+            images = { configured: true, hasFolder: false };
+        }
+    }
+
+    return {
+        id: project.id, name: project.name, status: project.status,
+        canGenerate: project.canGenerate, createdMs, cards, images,
+    };
 }
 
 // Resolve & validate a file path within a project; returns absolute path or null.
@@ -630,6 +691,12 @@ const server = http.createServer(async (req, res) => {
         // --- Projects ---
         if (pathname === '/api/projects' && req.method === 'GET') {
             return sendJson(res, 200, await listProjects());
+        }
+
+        if (pathname === '/api/project-overview' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            return sendJson(res, 200, await projectOverview(project));
         }
 
         if (pathname === '/api/project-files' && req.method === 'GET') {

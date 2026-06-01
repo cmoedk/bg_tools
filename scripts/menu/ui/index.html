@@ -19,15 +19,52 @@
             <div id="project-groups"></div>
         </aside>
 
-        <!-- MIDDLE: project info + inline text editor -->
+        <!-- MIDDLE: project view / action view / editor (one at a time) -->
         <section id="editor" class="pane editor-pane">
-            <div id="editor-empty" class="pane-empty">
+            <div id="mid-empty" class="pane-empty">
                 <p>Select a project on the left, or add one with <strong>+ Add</strong>.</p>
             </div>
-            <div id="editor-main" class="editor-main hidden">
-                <div class="editor-info">
-                    <span id="project-status" class="status-chip"></span>
-                    <span id="project-name" class="project-name"></span>
+
+            <!-- Project overview -->
+            <div id="mid-project" class="mid-view hidden">
+                <div class="view-head">
+                    <div class="editor-info">
+                        <span id="ov-status" class="status-chip"></span>
+                        <span id="ov-name" class="project-name"></span>
+                    </div>
+                    <button id="ov-promote-btn">▲ Promote</button>
+                </div>
+                <dl id="ov-details" class="details"></dl>
+            </div>
+
+            <!-- Action view -->
+            <div id="mid-action" class="mid-view hidden">
+                <div class="view-head">
+                    <h2 id="act-title"></h2>
+                    <button id="act-back" class="ghost">← Back</button>
+                </div>
+                <p id="act-desc" class="action-description"></p>
+                <div class="row run-row">
+                    <button id="run-btn">Run</button>
+                    <span id="run-status" class="badge"></span>
+                    <button id="stop-btn" class="ghost hidden">Stop</button>
+                    <button id="clear-btn" class="ghost">Clear</button>
+                </div>
+                <pre id="console" class="console hidden"></pre>
+                <div id="pdf-results" class="pdf-results hidden">
+                    <h3>Generated PDFs</h3>
+                    <ul id="pdf-list" class="pdf-list"></ul>
+                </div>
+            </div>
+
+            <!-- File editor -->
+            <div id="mid-editor" class="mid-view hidden">
+                <div class="view-head">
+                    <div class="editor-info">
+                        <span id="ed-status" class="status-chip"></span>
+                        <span id="ed-name" class="project-name"></span>
+                    </div>
+                    <button id="close-editor-btn" class="ghost">✕ Close Editor</button>
                 </div>
                 <div class="editor-toolbar">
                     <select id="file-select" class="select" title="Project files"></select>
@@ -40,17 +77,20 @@
             </div>
         </section>
 
-        <!-- RIGHT: preview + action menu -->
+        <!-- RIGHT: actions (project/action view) OR preview (editor view) -->
         <aside id="right" class="pane right-pane">
-            <div class="right-section preview-section">
+            <div id="right-actions" class="right-section hidden">
+                <div class="section-head"><span>Actions</span></div>
+                <ul id="action-list" class="list"></ul>
+                <p id="action-hint" class="muted"></p>
+            </div>
+            <div id="right-preview" class="right-section preview-section hidden">
                 <div class="section-head">
                     <span>Preview</span>
                     <span id="preview-note" class="muted preview-base"></span>
                 </div>
                 <div id="preview-host" class="preview-host">
-                    <!-- markdown preview -->
                     <iframe id="md-preview" class="md-preview-frame hidden" sandbox="allow-same-origin"></iframe>
-                    <!-- card (template) preview, scaled -->
                     <div id="card-stage" class="preview-stage hidden">
                         <div id="preview-scaler" class="preview-scaler">
                             <iframe id="card-preview" class="preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
@@ -59,43 +99,16 @@
                     <div id="preview-empty" class="pane-empty"><p>No preview for this file type.</p></div>
                 </div>
             </div>
-
-            <div class="right-section actions-section">
-                <div class="section-head"><span>Actions</span></div>
-                <ul id="action-list" class="list"></ul>
-                <p id="action-hint" class="muted"></p>
-            </div>
         </aside>
     </div>
 
-    <!-- Bottom console drawer (shown while a generator runs) -->
-    <section id="console-drawer" class="console-drawer hidden">
-        <div class="console-header">
-            <h2 id="console-title">Output</h2>
-            <div class="console-actions">
-                <span id="run-status" class="badge"></span>
-                <button id="stop-btn" class="ghost hidden">Stop</button>
-                <button id="clear-btn" class="ghost">Clear</button>
-                <button id="close-console-btn" class="ghost">Close</button>
-            </div>
-        </div>
-        <pre id="console" class="console"></pre>
-        <div id="pdf-results" class="pdf-results hidden">
-            <h3>Generated PDFs</h3>
-            <ul id="pdf-list" class="pdf-list"></ul>
-        </div>
-    </section>
-
-    <!-- Reusable modal (Add Project / Promote / Set image path) -->
+    <!-- Reusable modal (Add Project / Promote / Set image path / Unsaved) -->
     <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal" role="dialog" aria-modal="true">
             <h2 id="modal-title">Title</h2>
             <div id="modal-body" class="modal-body"></div>
             <div id="modal-error" class="error"></div>
-            <div class="modal-actions">
-                <button id="modal-cancel" class="ghost">Cancel</button>
-                <button id="modal-ok">OK</button>
-            </div>
+            <div id="modal-actions" class="modal-actions"></div>
         </div>
     </div>
 
