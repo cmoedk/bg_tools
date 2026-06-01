@@ -17,3 +17,5 @@
 - The Right Pane will only contain a Preview (no Actions).
 - When selecting a css file, default to the first html file, that imports that css file.
 - Pressing Tab in the editor, should insert 4 spaces.
+- At the top of the middle pane, should be a button: Close Editor.
+- There should be warnings if an edited file is not saved: ask "Save before closing"
