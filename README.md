@@ -71,3 +71,48 @@ pnpm start
 
 runs the menu against the `bg_tools` folder itself (mainly useful for
 development of the tools).
+
+## Start your own (private) rules repository
+
+The [`example/`](example/) folder is a ready-made template for a **private**
+game-design repository. Unlike the "use from a project" setup above, it does not
+need a sibling `bg_tools` checkout — its `package.json` pulls `bg_tools` straight
+from GitHub, so you can keep your private rules in their own repo anywhere.
+
+It contains the status folders of the **Moe & Spil Board Game Design System**
+(`1_idea/` … `7_archive/`), each with a `README.md` explaining what belongs
+there, but no game data of its own.
+
+To use it for your own private rules:
+
+1. **Copy** the `example/` folder out of `bg_tools` to wherever you keep your
+   projects, and rename it (e.g. `my-board-games`):
+
+   ```sh
+   cp -r bg_tools/example my-board-games
+   cd my-board-games
+   ```
+
+2. *(optional)* Make it its own **private** git repository:
+
+   ```sh
+   git init
+   git add .
+   git commit -m "Start my board games"
+   ```
+
+3. **Install** the tools (this fetches `bg_tools` from GitHub):
+
+   ```sh
+   pnpm install
+   ```
+
+4. **Launch** the menu against your repository:
+
+   ```sh
+   pnpm run tools
+   ```
+
+Your rules, images, and card data live only in your private repo; `bg_tools`
+stays a shared, publishable dependency. To pull in a newer version of the tools
+later, run `pnpm update bg_tools`.

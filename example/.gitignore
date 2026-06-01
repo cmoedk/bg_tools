@@ -1,0 +1,7 @@
+node_modules/
+
+# Output / runtime files created when the tools run.
+_dist/
+image_path.txt
+output.jpg
+*.log

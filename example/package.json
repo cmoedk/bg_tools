@@ -1,0 +1,18 @@
+{
+  "name": "my-board-games",
+  "version": "1.0.0",
+  "description": "A private board-game design repository that uses bg_tools for generating rules HTML, print-and-play PDFs, Tabletop Simulator sheets, boardgamemakers.com files, and card images.",
+  "type": "module",
+  "scripts": {
+    "tools": "bg_tools"
+  },
+  "dependencies": {
+    "bg_tools": "github:cmoedk/bg_tools"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "canvas",
+      "puppeteer"
+    ]
+  }
+}
