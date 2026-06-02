@@ -2,6 +2,10 @@
 
 ## 2 June 2026
 
+- Saved info (after pressing save in settings) is not centered and too much border radius.
+- In previewing images, you should be able to change the amount (mod). Also should just display images in .cards.json5, not all images in folder.
+- Folder names with .en f.ex. represents translations. They should be part of the project without the suffix, and their files in the Edit Files have "(en)" after the file name.
+
 - ~~Remove change image path from header~~
 - ~~Rename Board Game Rules to bg_tools in header and title~~
 - ~~Folder picker dialogue in Settings, when picking a new Master image folder~~
