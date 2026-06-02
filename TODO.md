@@ -2,6 +2,11 @@
 
 ## 2 June 2026
 
+- ~~Remove change image path from header~~
+- ~~Rename Board Game Rules to bg_tools in header and title~~
+- ~~Folder picker dialogue in Settings, when picking a new Master image folder~~
+- ~~Add the end of the image/card list, sum up the totals (unique/total)~~
+
 - ~~Add a Archive button next to the Promote button (window.confirm before archiving)~~
 - ~~Add a settings button at the bottom of the project list. Settings open up in the middle pane (empty right pane). We set the image asset folderpath from there.~~
 - ~~Change image_path.txt to a config.ini file, so we can add configurations later.~~

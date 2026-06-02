@@ -38,25 +38,6 @@ header h1 {
     font-weight: 600;
 }
 
-.image-path-bar {
-    font-size: 13px;
-    color: var(--muted);
-    background: var(--panel);
-    border: 1px solid var(--border);
-    padding: 6px 12px;
-    border-radius: 6px;
-    max-width: 60%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.image-path-bar .edit-link {
-    color: var(--accent);
-    cursor: pointer;
-    margin-left: 10px;
-}
-
 main {
     padding: 24px;
     max-width: 1100px;
@@ -709,6 +690,13 @@ table.batches th:nth-child(2), table.batches th:nth-child(3) { text-align: right
 .image-cell .img-id { font-weight: 700; word-break: break-all; }
 .image-cell .img-name { color: var(--muted); word-break: break-all; }
 .image-cell .img-amount { color: var(--accent); font-weight: 600; }
+.image-grid-foot {
+    flex: 0 0 auto;
+    padding: 12px 24px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-weight: 600;
+}
 
 @media (max-width: 900px) {
     #workspace { grid-template-columns: 220px 1fr; }

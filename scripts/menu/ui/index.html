@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Board Game Rules — Workspace</title>
+    <title>bg_tools — Workspace</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="workspace-body">
     <header>
-        <h1>🎲 Board Game Rules</h1>
-        <div id="image-path-bar" class="image-path-bar"></div>
+        <h1>🎲 bg_tools</h1>
     </header>
 
     <!-- Three-pane workspace -->
@@ -88,6 +87,7 @@
                 <label class="settings-label" for="settings-image-path">Master image folder</label>
                 <div class="row">
                     <input id="settings-image-path" type="text" class="name-input" placeholder="e.g. D:\images\master" autocomplete="off">
+                    <button id="settings-browse-btn" class="ghost">Browse…</button>
                     <button id="settings-save-btn">Save</button>
                     <span id="settings-status" class="badge"></span>
                 </div>
@@ -129,6 +129,7 @@
             <button id="image-grid-close" class="ghost">✕ Close</button>
         </div>
         <div id="image-grid" class="image-grid"></div>
+        <div id="image-grid-foot" class="image-grid-foot"></div>
     </div>
 
     <!-- Reusable modal (Add Project / Promote / Unsaved) -->

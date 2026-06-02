@@ -809,6 +809,24 @@ const server = http.createServer(async (req, res) => {
             });
         }
 
+        // Native folder picker (Windows). The server runs on the user's own
+        // machine, so we can pop a FolderBrowserDialog and return the chosen path.
+        if (pathname === '/api/pick-folder' && req.method === 'GET') {
+            if (process.platform !== 'win32') {
+                return sendJson(res, 400, { error: 'The folder picker is only available on Windows.' });
+            }
+            const ps = "Add-Type -AssemblyName System.Windows.Forms; " +
+                "$d = New-Object System.Windows.Forms.FolderBrowserDialog; " +
+                "$d.Description = 'Choose the master image folder'; $d.ShowNewFolderButton = $true; " +
+                "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($d.SelectedPath) }";
+            const child = spawn('powershell', ['-NoProfile', '-STA', '-Command', ps]);
+            let out = '';
+            child.stdout.on('data', (d) => { out += d.toString(); });
+            child.on('error', (err) => sendJson(res, 500, { error: err.message }));
+            child.on('close', () => sendJson(res, 200, { path: out.trim() }));
+            return;
+        }
+
         if (pathname === '/api/image-path' && req.method === 'POST') {
             const body = JSON.parse(await readBody(req) || '{}');
             const folderPath = (body.path || '').trim();
@@ -1020,7 +1038,7 @@ function start(port, attemptsLeft = 10) {
     });
     server.listen(port, () => {
         const addr = `http://localhost:${port}`;
-        console.log(`\nBoard Game Rules menu running at ${addr}`);
+        console.log(`\nbg_tools menu running at ${addr}`);
         console.log('Press Ctrl+C to stop.\n');
         if (process.env.MENU_NO_OPEN !== '1') {
             spawn('cmd', ['/c', 'start', '""', addr], { stdio: 'ignore', detached: true }).unref();

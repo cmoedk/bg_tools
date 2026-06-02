@@ -39,7 +39,6 @@ async function init() {
 async function loadConfig() {
     const res = await fetch('/api/config');
     config = await res.json();
-    renderImagePathBar();
 }
 
 async function loadProjects() {
@@ -59,15 +58,6 @@ function setView(v) {
     el('right-actions').classList.toggle('hidden', !(v === 'project' || v === 'action'));
     el('right-preview').classList.toggle('hidden', v !== 'editor');
     el('workspace').classList.toggle('editor-mode', v === 'editor');
-}
-
-// --- Image path bar ---
-function renderImagePathBar() {
-    const bar = el('image-path-bar');
-    bar.innerHTML = config.imagePathValid
-        ? `📁 <span title="${escapeHtml(config.imagePath)}">${escapeHtml(config.imagePath)}</span><span class="edit-link" id="edit-path">change</span>`
-        : `<span style="color:var(--red)">⚠ image folder not set</span><span class="edit-link" id="edit-path">set</span>`;
-    bar.querySelector('#edit-path').onclick = async () => { if (await guardUnsaved()) openSettings(); };
 }
 
 // --- Left: projects ---
@@ -165,7 +155,7 @@ function renderOverview(ov) {
         else row('Images', `${ov.images.count} image(s) found`);
 
         if (ov.cards && !ov.cards.error && ov.cards.batches && ov.cards.batches.length) {
-            renderBatchTable(batchHost, ov.cards.batches);
+            renderBatchTable(batchHost, ov.cards);
             batchHost.classList.remove('hidden');
         }
         if (ov.images.configured && ov.images.hasFolder && ov.images.count > 0) {
@@ -174,17 +164,20 @@ function renderOverview(ov) {
     }
 }
 
-function renderBatchTable(host, batches) {
+function renderBatchTable(host, cards) {
     const table = document.createElement('table');
     table.className = 'batches';
     table.innerHTML = '<thead><tr><th>Batch</th><th>Unique</th><th>Total</th></tr></thead>';
     const tb = document.createElement('tbody');
-    batches.forEach((b) => {
+    cards.batches.forEach((b) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${escapeHtml(b.name)}</td><td>${b.unique}</td><td>${b.total}</td>`;
         tb.appendChild(tr);
     });
     table.appendChild(tb);
+    const tf = document.createElement('tfoot');
+    tf.innerHTML = `<tr><th>Total</th><th>${cards.unique}</th><th>${cards.total}</th></tr>`;
+    table.appendChild(tf);
     host.appendChild(table);
 }
 
@@ -361,11 +354,22 @@ async function previewImages() {
         cell.appendChild(cap);
         grid.appendChild(cell);
     });
+    const totalAmount = data.images.reduce((s, im) => s + (im.amount || 0), 0);
+    el('image-grid-foot').textContent = `${data.images.length} unique · ${totalAmount} total`;
     el('image-grid-overlay').classList.remove('hidden');
 }
 function closeImageGrid() {
     el('image-grid-overlay').classList.add('hidden');
     el('image-grid').innerHTML = '';
+    el('image-grid-foot').textContent = '';
+}
+
+// --- Native folder picker for Settings ---
+async function pickFolder() {
+    const res = await fetch('/api/pick-folder');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { el('settings-error').textContent = data.error || 'Folder picker unavailable.'; return; }
+    if (data.path) el('settings-image-path').value = data.path;
 }
 
 // --- Settings ---
@@ -791,6 +795,7 @@ function escapeHtml(s) {
 
 // --- Wire up ---
 el('settings-btn').onclick = async () => { if (await guardUnsaved()) openSettings(); };
+el('settings-browse-btn').onclick = pickFolder;
 el('settings-save-btn').onclick = saveSettings;
 el('settings-image-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
 el('ov-promote-btn').onclick = () => { if (selectedId) promoteProject(selectedId); };
