@@ -1,7 +1,11 @@
 node_modules/
 
+# Portable Node/Git/pnpm downloaded by install.cmd.
+.runtime/
+
 # Output / runtime files created when the tools run.
 _dist/
 image_path.txt
+config.ini
 output.jpg
 *.log

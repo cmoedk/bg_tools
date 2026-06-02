@@ -1,6 +1,6 @@
 {
   "name": "bg_tools",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Board-game tooling: a browser menu that generates rules HTML, print-and-play PDFs, Tabletop Simulator sheets, boardgamemakers.com files, and card images from HTML templates. It operates on whichever project directory it is launched from.",
   "type": "module",
   "bin": {

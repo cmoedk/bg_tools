@@ -1,18 +1,19 @@
 // ===== bg_tools workspace =====
-// Left: projects (compact links, + Add). Middle: one of three views —
-//   project overview | action runner | file editor.
+// Left: projects (compact links, + Add) and a Settings button.
+// Middle: one of — project overview | action runner | file editor | settings.
 // Right: Actions (project/action view) or Preview (editor view).
 
 const NEW_FILE = '__new__';
 const CARD_W = 750;   // card preview renders at the generator's true viewport, then scales
 const CARD_H = 1125;
+const ACTION_GROUP_ORDER = ['Rules', 'Images', 'Templates', 'Other'];
 
 // --- State ---
 let config = null;            // { imagePath, imagePathValid, actions, statusFolders }
 let projects = { folders: [] };
 let selectedId = null;        // "<status>/<name>"
 let currentProject = null;    // { id, name, status, canGenerate }
-let currentView = 'empty';    // 'empty' | 'project' | 'action' | 'editor'
+let currentView = 'empty';    // 'empty' | 'project' | 'action' | 'editor' | 'settings'
 let currentActionIndex = null;
 let files = [];               // file descriptors (editor)
 let currentFilePath = null;
@@ -54,6 +55,7 @@ function setView(v) {
     el('mid-project').classList.toggle('hidden', v !== 'project');
     el('mid-action').classList.toggle('hidden', v !== 'action');
     el('mid-editor').classList.toggle('hidden', v !== 'editor');
+    el('mid-settings').classList.toggle('hidden', v !== 'settings');
     el('right-actions').classList.toggle('hidden', !(v === 'project' || v === 'action'));
     el('right-preview').classList.toggle('hidden', v !== 'editor');
     el('workspace').classList.toggle('editor-mode', v === 'editor');
@@ -62,11 +64,10 @@ function setView(v) {
 // --- Image path bar ---
 function renderImagePathBar() {
     const bar = el('image-path-bar');
-    const label = config.imagePathValid
+    bar.innerHTML = config.imagePathValid
         ? `📁 <span title="${escapeHtml(config.imagePath)}">${escapeHtml(config.imagePath)}</span><span class="edit-link" id="edit-path">change</span>`
         : `<span style="color:var(--red)">⚠ image folder not set</span><span class="edit-link" id="edit-path">set</span>`;
-    bar.innerHTML = label;
-    bar.querySelector('#edit-path').onclick = openImagePathModal;
+    bar.querySelector('#edit-path').onclick = async () => { if (await guardUnsaved()) openSettings(); };
 }
 
 // --- Left: projects ---
@@ -136,6 +137,8 @@ function renderOverview(ov) {
     el('ov-status').textContent = statusLabel(ov.status);
     el('ov-name').textContent = ov.name;
     el('ov-promote-btn').classList.toggle('hidden', ov.status === '7_archive');
+    el('ov-archive-btn').classList.toggle('hidden', ov.status === '7_archive');
+
     const dl = el('ov-details');
     dl.innerHTML = '';
     const row = (k, v) => {
@@ -145,39 +148,89 @@ function renderOverview(ov) {
     };
     row('Folder', ov.status);
     row('Created', ov.createdMs ? new Date(ov.createdMs).toLocaleString() : '—');
-    if (ov.cards === null) row('Cards', '— (no .cards.json5)');
-    else if (ov.cards.error) row('Cards', `Could not parse ${ov.cards.file}`);
-    else row('Cards', `${ov.cards.defined} card(s) in ${ov.cards.batches} batch(es) · ${ov.cards.file}`);
-    if (!ov.images.configured) row('Images', '— (master image folder not set)');
-    else if (!ov.images.hasFolder) row('Images', `No folder “${ov.name}” in the image path`);
-    else row('Images', `${ov.images.count} image(s) found`);
+
+    const batchHost = el('ov-batches');
+    batchHost.classList.add('hidden');
+    batchHost.innerHTML = '';
+    el('ov-preview-images-btn').classList.add('hidden');
+
+    // Cards / Images only matter once a game has components (3_test onward).
+    if (ov.showAssets) {
+        if (ov.cards === null) row('Cards', '— (no .cards.json5)');
+        else if (ov.cards.error) row('Cards', `Could not parse ${ov.cards.file}`);
+        else row('Cards', `${ov.cards.unique} unique · ${ov.cards.total} total · ${ov.cards.file}`);
+
+        if (!ov.images.configured) row('Images', '— (master image folder not set)');
+        else if (!ov.images.hasFolder) row('Images', `No folder “${ov.name}” in the image path`);
+        else row('Images', `${ov.images.count} image(s) found`);
+
+        if (ov.cards && !ov.cards.error && ov.cards.batches && ov.cards.batches.length) {
+            renderBatchTable(batchHost, ov.cards.batches);
+            batchHost.classList.remove('hidden');
+        }
+        if (ov.images.configured && ov.images.hasFolder && ov.images.count > 0) {
+            el('ov-preview-images-btn').classList.remove('hidden');
+        }
+    }
 }
 
-// --- Right: actions ---
+function renderBatchTable(host, batches) {
+    const table = document.createElement('table');
+    table.className = 'batches';
+    table.innerHTML = '<thead><tr><th>Batch</th><th>Unique</th><th>Total</th></tr></thead>';
+    const tb = document.createElement('tbody');
+    batches.forEach((b) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(b.name)}</td><td>${b.unique}</td><td>${b.total}</td>`;
+        tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    host.appendChild(table);
+}
+
+// --- Right: actions (grouped) ---
 function renderActions() {
-    const list = el('action-list');
-    list.innerHTML = '';
+    const host = el('action-groups');
+    host.innerHTML = '';
     const hint = el('action-hint');
     if (!currentProject) { hint.textContent = 'Select a project.'; return; }
 
-    // Edit Files is always the first action.
-    const edit = document.createElement('li');
-    edit.textContent = '📝 Edit Files';
-    edit.onclick = openEditor;
-    list.appendChild(edit);
+    // Editing is always available (rules / templates).
+    host.appendChild(actionGroup('Editing', [{ label: '📝 Edit Files', onClick: openEditor }]));
 
     if (currentProject.canGenerate) {
         hint.textContent = config.imagePathValid ? '' : '⚠ Set the master image folder to generate.';
-        config.actions.forEach((a) => {
-            const li = document.createElement('li');
-            li.textContent = a.label;
-            li.title = a.description || '';
-            li.onclick = () => openAction(a.index);
-            list.appendChild(li);
+        const byGroup = {};
+        config.actions.forEach((a) => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
+        ACTION_GROUP_ORDER.forEach((g) => {
+            if (!byGroup[g]) return;
+            host.appendChild(actionGroup(g, byGroup[g].map((a) => ({
+                label: a.label, title: a.description, onClick: () => openAction(a.index),
+            }))));
         });
     } else {
         hint.textContent = 'Generators are available for Test, Playtest and Prototype projects.';
     }
+}
+
+function actionGroup(title, items) {
+    const wrap = document.createElement('div');
+    wrap.className = 'action-group';
+    const h = document.createElement('div');
+    h.className = 'action-group-title';
+    h.textContent = title;
+    wrap.appendChild(h);
+    const ul = document.createElement('ul');
+    ul.className = 'list';
+    items.forEach((it) => {
+        const li = document.createElement('li');
+        li.textContent = it.label;
+        if (it.title) li.title = it.title;
+        li.onclick = it.onClick;
+        ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    return wrap;
 }
 
 // --- Action View ---
@@ -201,7 +254,7 @@ function openAction(index) {
 
 function runAction() {
     if (currentActionIndex === null || !currentProject || !currentProject.canGenerate) return;
-    if (!config.imagePathValid) { openImagePathModal(); return; }
+    if (!config.imagePathValid) { openSettings(); return; }
     if (currentStream) currentStream.close();
     const action = config.actions[currentActionIndex];
 
@@ -267,6 +320,81 @@ function renderPdfs(pdfs) {
         list.appendChild(li);
     });
     el('pdf-results').classList.remove('hidden');
+}
+
+// --- Archive (discard shortcut) ---
+async function archiveProject() {
+    if (!selectedId || !currentProject) return;
+    if (!window.confirm(`Archive “${currentProject.name}”?\nIt will be moved to 7_archive.`)) return;
+    const res = await fetch('/api/archive', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { openAlert('Archive', data.error || 'Could not archive.'); return; }
+    await loadProjects();
+    selectProject(data.id);
+}
+
+// --- Preview Images (full-screen grid) ---
+async function previewImages() {
+    const res = await fetch(`/api/project-images?id=${encodeURIComponent(selectedId)}`);
+    const data = await res.json();
+    if (!res.ok || !data.images || !data.images.length) { openAlert('Images', 'No images found for this project.'); return; }
+    el('image-grid-title').textContent = `Images — ${currentProject.name} (${data.images.length})`;
+    const grid = el('image-grid');
+    grid.innerHTML = '';
+    const idp = idPathFor(selectedId);
+    data.images.forEach((im) => {
+        const cell = document.createElement('figure');
+        cell.className = 'image-cell';
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = `/api/image/${idp}/${encodeURIComponent(im.file)}`;
+        img.alt = im.id;
+        const cap = document.createElement('figcaption');
+        cap.innerHTML =
+            `<span class="img-id">${escapeHtml(im.id)}</span>` +
+            `<span class="img-name">${escapeHtml(im.file)}</span>` +
+            `<span class="img-amount">${im.amount === null ? '—' : '×' + im.amount}</span>`;
+        cell.appendChild(img);
+        cell.appendChild(cap);
+        grid.appendChild(cell);
+    });
+    el('image-grid-overlay').classList.remove('hidden');
+}
+function closeImageGrid() {
+    el('image-grid-overlay').classList.add('hidden');
+    el('image-grid').innerHTML = '';
+}
+
+// --- Settings ---
+function openSettings() {
+    el('settings-image-path').value = config.imagePath || '';
+    el('settings-error').textContent = '';
+    setSettingsStatus('');
+    setView('settings');
+    setTimeout(() => el('settings-image-path').focus(), 30);
+}
+async function saveSettings() {
+    el('settings-error').textContent = '';
+    const value = el('settings-image-path').value.trim();
+    if (!value) { el('settings-error').textContent = 'Enter a path.'; return; }
+    setSettingsStatus('saving');
+    const res = await fetch('/api/image-path', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: value }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setSettingsStatus(''); el('settings-error').textContent = data.error || 'Failed to save.'; return; }
+    setSettingsStatus('saved');
+    await loadConfig();
+}
+function setSettingsStatus(state) {
+    const b = el('settings-status');
+    b.className = 'badge ' + (state === 'saved' ? 'ok' : state === 'saving' ? 'running' : '');
+    b.textContent = state === 'saved' ? 'Saved' : state === 'saving' ? 'Saving…' : '';
+    if (state === 'saved') setTimeout(() => { if (b.textContent === 'Saved') setSettingsStatus(''); }, 2000);
 }
 
 // --- Editor View ---
@@ -439,9 +567,11 @@ async function renderMarkdownPreview() {
     frame.srcdoc = data.html;
 }
 
-function idPath() {
-    return selectedId.split('/').map(encodeURIComponent).join('/');
+function idPathFor(id) {
+    return id.split('/').map(encodeURIComponent).join('/');
 }
+function idPath() { return idPathFor(selectedId); }
+
 function injectBase(html) {
     const base = `<base href="${location.origin}/api/design-asset/${idPath()}/">`;
     if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => m + base);
@@ -581,37 +711,6 @@ async function promoteProject(id) {
     openModal({ title: 'Promote project', body: wrap, buttons: [btnCancel(), btnPrimary('Promote', promote)] });
 }
 
-// --- Image path modal ---
-function openImagePathModal() {
-    const wrap = document.createElement('div');
-    const lbl = document.createElement('p');
-    lbl.className = 'muted';
-    lbl.textContent = 'Enter the full path to the master image folder:';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'name-input modal-input';
-    input.placeholder = 'e.g. D:\\images\\master';
-    input.value = config.imagePath || '';
-    wrap.appendChild(lbl);
-    wrap.appendChild(input);
-    const save = async () => {
-        const value = input.value.trim();
-        if (!value) { setModalError('Enter a path.'); return; }
-        const res = await fetch('/api/image-path', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: value }),
-        });
-        const data = await res.json();
-        if (!res.ok) { setModalError(data.error || 'Failed to save.'); return; }
-        closeModal();
-        await loadConfig();
-        renderActions();
-    };
-    openModal({ title: 'Master image folder', body: wrap, buttons: [btnCancel(), btnPrimary('Save', save)] });
-    setTimeout(() => input.focus(), 50);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
-}
-
 // --- Unsaved-changes guard ---
 function guardUnsaved() {
     return new Promise((resolve) => {
@@ -691,6 +790,19 @@ function escapeHtml(s) {
 }
 
 // --- Wire up ---
+el('settings-btn').onclick = async () => { if (await guardUnsaved()) openSettings(); };
+el('settings-save-btn').onclick = saveSettings;
+el('settings-image-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
+el('ov-promote-btn').onclick = () => { if (selectedId) promoteProject(selectedId); };
+el('ov-archive-btn').onclick = archiveProject;
+el('ov-preview-images-btn').onclick = previewImages;
+el('image-grid-close').onclick = closeImageGrid;
+el('act-back').onclick = () => setView('project');
+el('run-btn').onclick = runAction;
+el('clear-btn').onclick = () => { consoleEl.textContent = ''; };
+el('close-editor-btn').onclick = closeEditor;
+el('save-btn').onclick = saveFile;
+
 el('file-select').addEventListener('change', async () => {
     const v = el('file-select').value;
     if (!(await guardUnsaved())) { el('file-select').value = currentFilePath || NEW_FILE; return; }
@@ -709,12 +821,6 @@ code.addEventListener('keydown', (e) => {
         schedulePreview();
     }
 });
-el('save-btn').onclick = saveFile;
-el('close-editor-btn').onclick = closeEditor;
-el('ov-promote-btn').onclick = () => { if (selectedId) promoteProject(selectedId); };
-el('act-back').onclick = () => setView('project');
-el('run-btn').onclick = runAction;
-el('clear-btn').onclick = () => { consoleEl.textContent = ''; };
 stopBtn.onclick = () => {
     if (currentStream) {
         currentStream.close();
@@ -730,7 +836,10 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         saveFile();
     }
-    if (e.key === 'Escape' && !el('modal-overlay').classList.contains('hidden')) closeModal(true);
+    if (e.key === 'Escape') {
+        if (!el('image-grid-overlay').classList.contains('hidden')) closeImageGrid();
+        else if (!el('modal-overlay').classList.contains('hidden')) closeModal(true);
+    }
 });
 el('modal-overlay').addEventListener('click', (e) => { if (e.target === el('modal-overlay')) closeModal(true); });
 window.addEventListener('beforeunload', (e) => {

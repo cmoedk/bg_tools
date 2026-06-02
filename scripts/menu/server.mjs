@@ -19,7 +19,8 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = process.cwd();
 const GENERATE_DIR = path.join(__dirname, '..', 'generate'); // bg_tools' own generator scripts
 const TEMPLATES_DIR = path.join(__dirname, '..', '..', 'templates'); // bg_tools' starter templates
-const IMAGE_PATH_FILE = path.join(PROJECT_ROOT, 'image_path.txt');
+const CONFIG_FILE = path.join(PROJECT_ROOT, 'config.ini'); // per-project settings (image path, ...)
+const LEGACY_IMAGE_FILE = path.join(PROJECT_ROOT, 'image_path.txt'); // migrated from, if present
 const UI_DIR = path.join(__dirname, 'ui');
 const DIST_DIR = path.join(PROJECT_ROOT, '_dist'); // generators write their output here
 
@@ -48,39 +49,50 @@ const KIND_BY_EXT = { '.md': 'markdown', '.json5': 'json5', '.txt': 'text', '.ht
 const RULES_RE = /^(.*)_rules_([0-9][0-9.]*)\.(test|playtest|prototype|production)\.md$/i;
 const DRAFT_RULES_RE = /^(.*)_rules\.draft\.md$/i;
 
+// Generators, grouped for the Action panel:
+//   Rules     - from the rules markdown
+//   Images    - from the card images in the master image folder
+//   Templates - from the HTML/CSS card templates in design/
 const MENU_OPTIONS = [
     {
         label: 'Generate rules HTML',
+        group: 'Rules',
         script: path.join(GENERATE_DIR, 'generate_html.mjs'),
         description: "Renders the project's rules markdown into a styled, standalone HTML file in _dist.",
     },
     {
         label: 'Generate rules PDF',
+        group: 'Rules',
         script: path.join(PROJECT_ROOT, 'generate_rules_pdf.js'),
         description: 'Generates a PDF of the rules (runs generate_rules_pdf.js at the project root).',
     },
     {
         label: 'Generate Print-and-Play PDF',
+        group: 'Images',
         script: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs'),
         description: 'Builds a print-and-play PDF laid out from the card images in the master image folder.',
     },
     {
         label: 'Generate Tabletop Simulator Files',
+        group: 'Images',
         script: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
         description: 'Creates Tabletop Simulator deck image sheets from the card images.',
     },
     {
         label: 'Generate Boardgamemakers.com files',
+        group: 'Images',
         script: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
         description: 'Creates card front/back image files formatted for boardgamemakers.com.',
     },
     {
         label: 'Generate Print-and-Play PDF (from templates)',
+        group: 'Templates',
         script: path.join(GENERATE_DIR, 'generate_test_pnp_pdf.mjs'),
         description: 'Renders each card from its HTML template (in design/) with Puppeteer and assembles a print-and-play PDF.',
     },
     {
         label: 'Generate JPGs (from templates)',
+        group: 'Templates',
         script: path.join(GENERATE_DIR, 'generate_jpgs_from_templates.mjs'),
         description: 'Renders each card from its HTML template (in design/) with Puppeteer and saves one JPG per card to _dist.',
     },
@@ -88,20 +100,75 @@ const MENU_OPTIONS = [
 
 const PORT = Number(process.env.MENU_PORT) || 4599;
 
-// ---------- Image path ----------
-async function readImagePath() {
+// ---------- Config (config.ini) ----------
+// Minimal INI: "[section]" lines and "key = value" lines. Keys are stored flat
+// as "section.key" (top-level keys keep their bare name). This keeps room to add
+// more settings later without changing the on-disk format.
+function parseIni(text) {
+    const map = {};
+    let section = '';
+    for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || line.startsWith(';') || line.startsWith('#')) continue;
+        const sec = line.match(/^\[(.+)\]$/);
+        if (sec) { section = sec[1].trim(); continue; }
+        const eq = line.indexOf('=');
+        if (eq === -1) continue;
+        const key = line.slice(0, eq).trim();
+        const val = line.slice(eq + 1).trim();
+        map[section ? `${section}.${key}` : key] = val;
+    }
+    return map;
+}
+
+function serializeIni(map) {
+    const sections = {};
+    for (const [k, v] of Object.entries(map)) {
+        const i = k.indexOf('.');
+        const s = i === -1 ? '' : k.slice(0, i);
+        const key = i === -1 ? k : k.slice(i + 1);
+        (sections[s] = sections[s] || []).push([key, v]);
+    }
+    let out = '';
+    if (sections['']) { for (const [k, v] of sections['']) out += `${k} = ${v}\n`; out += '\n'; }
+    for (const s of Object.keys(sections)) {
+        if (s === '') continue;
+        out += `[${s}]\n`;
+        for (const [k, v] of sections[s]) out += `${k} = ${v}\n`;
+        out += '\n';
+    }
+    return out;
+}
+
+async function readConfigMap() {
     try {
-        const data = await fs.readFile(IMAGE_PATH_FILE, 'utf-8');
-        const selectedPath = data.split(/\r?\n/)[0].replace(/\\/g, '/').trim();
-        if (!selectedPath) return { path: '', valid: false };
-        try {
-            const stat = await fs.stat(selectedPath);
-            return { path: selectedPath, valid: stat.isDirectory() };
-        } catch {
-            return { path: selectedPath, valid: false };
-        }
+        return parseIni(await fs.readFile(CONFIG_FILE, 'utf-8'));
     } catch {
-        return { path: '', valid: false };
+        // Migrate a pre-existing image_path.txt (first line) the first time around.
+        try {
+            const legacy = (await fs.readFile(LEGACY_IMAGE_FILE, 'utf-8')).split(/\r?\n/)[0].trim();
+            if (legacy) return { 'paths.images': legacy };
+        } catch { /* none */ }
+        return {};
+    }
+}
+
+async function writeConfigValue(key, value) {
+    const map = await readConfigMap();
+    map[key] = value;
+    await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8');
+}
+
+// The master image folder, read from config.ini ([paths] images = ...).
+async function readImagePath() {
+    const map = await readConfigMap();
+    const selectedPath = (map['paths.images'] || '').replace(/\\/g, '/').trim();
+    if (!selectedPath) return { path: '', valid: false };
+    try {
+        const stat = await fs.stat(selectedPath);
+        return { path: selectedPath, valid: stat.isDirectory() };
+    } catch {
+        return { path: selectedPath, valid: false };
     }
 }
 
@@ -215,7 +282,93 @@ async function listProjectFiles(project) {
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff']);
 
+// Find and parse the project's *.cards.json5 (if any). Returns {file, data} or null.
+async function readCardsFile(project) {
+    if (project.kind !== 'folder') return null;
+    let entries;
+    try { entries = await fs.readdir(project.folderDir, { withFileTypes: true }); } catch { return null; }
+    const f = entries.find(e => e.isFile() && /\.cards\.json5$/i.test(e.name));
+    if (!f) return null;
+    try {
+        const data = JSON5.parse(await fs.readFile(path.join(project.folderDir, f.name), 'utf-8'));
+        return { file: f.name, data };
+    } catch {
+        return { file: f.name, data: null, error: true };
+    }
+}
+
+// id -> total quantity across all batches (used for an image's "amount").
+function cardAmounts(data) {
+    const amounts = {};
+    for (const v of Object.values(data || {})) {
+        if (!v || typeof v !== 'object') continue;
+        for (const [k, qty] of Object.entries(v)) {
+            if (k.startsWith('_')) continue;
+            amounts[k] = (amounts[k] || 0) + (typeof qty === 'number' ? qty : 1);
+        }
+    }
+    return amounts;
+}
+
+// Detailed card overview: per-batch unique/total counts plus grand totals.
+async function readCardsOverview(project) {
+    const c = await readCardsFile(project);
+    if (!c) return null;
+    if (c.error || !c.data) return { file: c.file, error: true };
+    const batches = [];
+    let unique = 0, total = 0;
+    for (const [name, v] of Object.entries(c.data)) {
+        if (!v || typeof v !== 'object') continue;
+        let u = 0, t = 0;
+        for (const [k, qty] of Object.entries(v)) {
+            if (k.startsWith('_')) continue;
+            u++; t += (typeof qty === 'number' ? qty : 1);
+        }
+        batches.push({ name, unique: u, total: t });
+        unique += u; total += t;
+    }
+    return { file: c.file, batches, unique, total };
+}
+
+// Summary of images in <imagePath>/<name> (count only).
+async function imagesSummary(project) {
+    const img = await readImagePath();
+    if (!img.valid) return { configured: false };
+    const dir = path.join(img.path, project.name);
+    try {
+        const st = await fs.stat(dir);
+        if (!st.isDirectory()) return { configured: true, hasFolder: false };
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        const count = entries.filter(e => e.isFile() && IMAGE_EXT.has(path.extname(e.name).toLowerCase())).length;
+        return { configured: true, hasFolder: true, count };
+    } catch {
+        return { configured: true, hasFolder: false };
+    }
+}
+
+// Full image list for the Preview Images grid: each { file, id, amount }.
+async function listProjectImages(project) {
+    const img = await readImagePath();
+    if (!img.valid) return { configured: false, images: [] };
+    const dir = path.join(img.path, project.name);
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); }
+    catch { return { configured: true, hasFolder: false, images: [] }; }
+    const c = await readCardsFile(project);
+    const amounts = c && c.data ? cardAmounts(c.data) : {};
+    const images = entries
+        .filter(e => e.isFile() && IMAGE_EXT.has(path.extname(e.name).toLowerCase()))
+        .map(e => {
+            const id = e.name.replace(/\.[^.]+$/, '');
+            return { file: e.name, id, amount: id in amounts ? amounts[id] : null };
+        })
+        .sort((a, b) => a.id.localeCompare(b.id));
+    return { configured: true, hasFolder: true, images };
+}
+
 // Build an overview of a project for the middle "Project View".
+// Cards/images are only relevant once a game has components, so they are omitted
+// for 1_idea and 2_draft (showAssets = false).
 async function projectOverview(project) {
     let createdMs = null;
     try {
@@ -224,52 +377,17 @@ async function projectOverview(project) {
         createdMs = st.birthtimeMs || st.ctimeMs || st.mtimeMs || null;
     } catch { /* missing */ }
 
-    // Cards: parse the project's *.cards.json5 and count defined card ids.
+    const showAssets = !(project.status === '1_idea' || project.status === '2_draft');
     let cards = null;
-    if (project.kind === 'folder') {
-        try {
-            const entries = await fs.readdir(project.folderDir, { withFileTypes: true });
-            const cardsFile = entries.find(e => e.isFile() && /\.cards\.json5$/i.test(e.name));
-            if (cardsFile) {
-                try {
-                    const data = JSON5.parse(await fs.readFile(path.join(project.folderDir, cardsFile.name), 'utf-8'));
-                    let defined = 0, batches = 0;
-                    for (const v of Object.values(data || {})) {
-                        if (v && typeof v === 'object') {
-                            batches++;
-                            for (const key of Object.keys(v)) if (!key.startsWith('_')) defined++;
-                        }
-                    }
-                    cards = { file: cardsFile.name, defined, batches };
-                } catch {
-                    cards = { file: cardsFile.name, error: true };
-                }
-            }
-        } catch { /* no folder */ }
-    }
-
-    // Images: look for a subfolder named after the project in the master image folder.
     let images = { configured: false };
-    const img = await readImagePath();
-    if (img.valid) {
-        const dir = path.join(img.path, project.name);
-        try {
-            const st = await fs.stat(dir);
-            if (st.isDirectory()) {
-                const entries = await fs.readdir(dir, { withFileTypes: true });
-                const count = entries.filter(e => e.isFile() && IMAGE_EXT.has(path.extname(e.name).toLowerCase())).length;
-                images = { configured: true, hasFolder: true, count };
-            } else {
-                images = { configured: true, hasFolder: false };
-            }
-        } catch {
-            images = { configured: true, hasFolder: false };
-        }
+    if (showAssets) {
+        cards = await readCardsOverview(project);
+        images = await imagesSummary(project);
     }
 
     return {
         id: project.id, name: project.name, status: project.status,
-        canGenerate: project.canGenerate, createdMs, cards, images,
+        canGenerate: project.canGenerate, showAssets, createdMs, cards, images,
     };
 }
 
@@ -503,6 +621,24 @@ async function executePromotion(plan) {
     }
 }
 
+// Move a project straight to 7_archive (a discard shortcut, separate from Promote).
+async function archiveProject(project) {
+    if (project.status === '7_archive') throw httpError(400, 'Project is already archived.');
+    const archiveDir = path.join(PROJECT_ROOT, '7_archive');
+    const dest = path.join(archiveDir, project.name);
+    if (existsSync(dest)) throw httpError(409, `7_archive/${project.name} already exists.`);
+    await fs.mkdir(archiveDir, { recursive: true });
+    if (project.kind === 'file') {
+        if (!existsSync(project.ideaFile)) throw httpError(404, 'Idea file is missing.');
+        await fs.mkdir(dest, { recursive: true });
+        await fs.rename(project.ideaFile, path.join(dest, `${project.name}.idea.md`));
+    } else {
+        if (!existsSync(project.folderDir)) throw httpError(404, 'Project folder is missing.');
+        await fs.rename(project.folderDir, dest);
+    }
+    return `7_archive/${project.name}`;
+}
+
 // ---------- Generated-PDF tracking ----------
 async function scanPdfs() {
     const found = new Map();
@@ -668,7 +804,7 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, {
                 imagePath: image.path,
                 imagePathValid: image.valid,
-                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '' })),
+                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '', group: o.group || 'Other' })),
                 statusFolders: STATUS_FOLDERS.map(f => ({ ...f, canGenerate: GENERATE_FOLDERS.has(f.key) })),
             });
         }
@@ -683,7 +819,7 @@ const server = http.createServer(async (req, res) => {
             } catch {
                 return sendJson(res, 400, { error: 'Path does not exist.' });
             }
-            await fs.writeFile(IMAGE_PATH_FILE, folderPath, 'utf-8');
+            await writeConfigValue('paths.images', folderPath);
             IMAGE_PATH = folderPath.replace(/\\/g, '/');
             return sendJson(res, 200, { ok: true, imagePath: IMAGE_PATH });
         }
@@ -704,6 +840,20 @@ const server = http.createServer(async (req, res) => {
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
             const files = await listProjectFiles(project);
             return sendJson(res, 200, { id: project.id, name: project.name, status: project.status, canGenerate: project.canGenerate, files });
+        }
+
+        if (pathname === '/api/project-images' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            return sendJson(res, 200, await listProjectImages(project));
+        }
+
+        if (pathname === '/api/archive' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const id = await archiveProject(project);
+            return sendJson(res, 200, { ok: true, id });
         }
 
         if (pathname === '/api/add-project' && req.method === 'POST') {
@@ -780,6 +930,30 @@ const server = http.createServer(async (req, res) => {
             const designDir = path.join(project.folderDir, 'design');
             const filePath = path.join(designDir, assetRel);
             if (!filePath.startsWith(designDir) || !existsSync(filePath) || !(await fs.stat(filePath)).isFile()) {
+                res.writeHead(404).end('Not found');
+                return;
+            }
+            const ext = path.extname(filePath).toLowerCase();
+            res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+            return createReadStream(filePath).pipe(res);
+        }
+
+        // Serve a project's card images from the master image folder (Preview Images grid).
+        // URL: /api/image/<status>/<name>/<file>
+        if (pathname.startsWith('/api/image/') && req.method === 'GET') {
+            const rest = pathname.slice('/api/image/'.length).split('/');
+            if (rest.length < 3) { res.writeHead(404).end('Not found'); return; }
+            const id = `${decodeURIComponent(rest[0])}/${decodeURIComponent(rest[1])}`;
+            const fileName = rest.slice(2).map(decodeURIComponent).join('/');
+            const project = resolveProject(id);
+            const img = await readImagePath();
+            if (!project || !img.valid || fileName.includes('..') || !IMAGE_EXT.has(path.extname(fileName).toLowerCase())) {
+                res.writeHead(404).end('Not found');
+                return;
+            }
+            const imgDir = path.join(img.path, project.name);
+            const filePath = path.join(imgDir, fileName);
+            if (!filePath.startsWith(imgDir) || !existsSync(filePath) || !(await fs.stat(filePath)).isFile()) {
                 res.writeHead(404).end('Not found');
                 return;
             }

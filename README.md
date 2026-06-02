@@ -44,14 +44,15 @@ Never used Git, Node, or a terminal? Use the one-click installer:
 
 The installer will, in one go:
 
-- install **Git**, **Node.js**, and **pnpm** if they are missing (via Windows'
-  built-in `winget`),
 - let you **pick a folder** and name for your project,
-- create that project from the [`example/`](example/) template, and
+- download **portable** Node.js, Git and pnpm into a `.runtime/` folder inside
+  that project — nothing is installed system-wide and no admin rights are needed,
+- create the project from the [`example/`](example/) template, and
 - install everything and offer to launch the menu.
 
 Afterwards you just double-click **`run.cmd`** inside your project to open the
-tools again. The manual steps below are for everyone else.
+tools again (it puts the portable tools on `PATH` automatically). The manual
+steps below are for everyone else.
 
 ## Install
 

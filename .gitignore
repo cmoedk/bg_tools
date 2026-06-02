@@ -4,5 +4,6 @@ node_modules/
 # being worked on, but can appear here if bg_tools is run standalone).
 _dist/
 image_path.txt
+config.ini
 output.jpg
 *.log

@@ -1,5 +1,20 @@
 # TODOS
 
+## 2 June 2026
+
+- ~~Add a Archive button next to the Promote button (window.confirm before archiving)~~
+- ~~Add a settings button at the bottom of the project list. Settings open up in the middle pane (empty right pane). We set the image asset folderpath from there.~~
+- ~~Change image_path.txt to a config.ini file, so we can add configurations later.~~
+- ~~Project overview: Dont show "cards" and "images" on 1_idea and 2_draft. Cards should list a detailed view of the batch names, and amount of cards (unique and total).~~
+- ~~Under the information list, add a button: Preview Images (if images exist for that project). This will open a full screen (closable) image grid of all images, with their id, name and amount information underneath each image.~~
+- ~~Group Action buttons in the Action panel: Editing (rules/templates), Rules (generate html/pdf), Images (tts, boardgamemaker, pdf), Templates (jpgs, tts, boardgamemaker, pdf)~~
+- ~~Scroll is not working in the editor.~~
+- ~~This is not version 1.0.0, but 0.1.0 we are working on.~~
+- ~~Can we avoid using winget in install.cmd? And use portable versions of node/git/pnpm? (Yes — install.cmd now downloads portable Node/Git/pnpm into the project's .runtime/.)~~
+
+
+## 1 June 2026
+
 ## Project Pane
 
 - ~~Each project group should be a list of text-links, instead of buttons. Max. 5 items visible per group, scroll for more projects.~~

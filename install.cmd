@@ -3,83 +3,48 @@ setlocal EnableExtensions
 title bg_tools installer
 color 0B
 
-set "REPO=https://github.com/cmoedk/bg_tools"
+REM ------------------------------------------------------------
+REM  Portable installer - no winget, no admin, nothing installed
+REM  system-wide. Node, Git (MinGit) and pnpm are downloaded as
+REM  portable builds into  <project>\.runtime\  and the project's
+REM  run.cmd puts them on PATH when you launch the tools.
+REM ------------------------------------------------------------
+
+REM  Pinned tool versions (bump these to upgrade).
+set "NODE_VER=20.18.1"
+set "GIT_VER=2.47.1"
+set "GIT_TAG=v2.47.1.windows.1"
+set "PNPM_VER=9.15.0"
+
+set "NODE_URL=https://nodejs.org/dist/v%NODE_VER%/node-v%NODE_VER%-win-x64.zip"
+set "GIT_URL=https://github.com/git-for-windows/git/releases/download/%GIT_TAG%/MinGit-%GIT_VER%-64-bit.zip"
+set "PNPM_URL=https://github.com/pnpm/pnpm/releases/download/v%PNPM_VER%/pnpm-win-x64.exe"
+set "REPO_ZIP=https://codeload.github.com/cmoedk/bg_tools/zip/refs/heads/main"
 
 echo(
 echo  ============================================================
 echo    bg_tools - Board Game Design Toolkit
-echo    Beginner installer
+echo    Portable installer
 echo  ============================================================
 echo(
 echo  This will:
-echo     1. Install Git, Node.js and pnpm  (only if missing)
-echo     2. Let you choose a folder for your games
+echo     1. Let you choose a folder for your games
+echo     2. Download portable Node.js, Git and pnpm into it
+echo        (nothing is installed system-wide)
 echo     3. Create a new project from the bg_tools example
 echo(
-echo  You may see Windows "User Account Control" prompts during
-echo  the software installs - please click Yes.
+echo  Tip: a few hundred MB will be downloaded the first time.
 echo(
 pause
 echo(
 
 REM ------------------------------------------------------------
-REM  0. winget (App Installer) is required to install software
+REM  1. Choose location + project name
 REM ------------------------------------------------------------
-where winget >nul 2>&1
-if errorlevel 1 goto NO_WINGET
-
-REM ------------------------------------------------------------
-REM  1. Git
-REM ------------------------------------------------------------
-echo [1/4] Git
-where git >nul 2>&1 && echo       already installed. || (
-  echo       installing...
-  winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
-)
-
-REM ------------------------------------------------------------
-REM  2. Node.js (LTS)
-REM ------------------------------------------------------------
-echo [2/4] Node.js
-where node >nul 2>&1 && echo       already installed. || (
-  echo       installing...
-  winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
-)
-
-REM  Pick up Git/Node without needing a new terminal.
-call :REFRESH_PATH
-
-REM ------------------------------------------------------------
-REM  3. pnpm
-REM ------------------------------------------------------------
-echo [3/4] pnpm
-where pnpm >nul 2>&1 && echo       already installed. || (
-  echo       setting up via corepack...
-  call corepack enable >nul 2>&1
-  call corepack prepare pnpm@latest --activate >nul 2>&1
-  call :REFRESH_PATH
-)
-where pnpm >nul 2>&1 || (
-  echo       corepack unavailable - installing pnpm via npm...
-  call npm install -g pnpm
-  call :REFRESH_PATH
-)
-
-REM  Final sanity check that the toolchain is now usable.
-where git  >nul 2>&1 || goto TOOL_MISSING
-where node >nul 2>&1 || goto TOOL_MISSING
-where pnpm >nul 2>&1 || goto TOOL_MISSING
-
-REM ------------------------------------------------------------
-REM  4. Create the project
-REM ------------------------------------------------------------
-echo [4/4] Your project
-echo(
-echo       A folder picker will open - choose WHERE your project
-echo       folder should be created (e.g. your Documents folder).
+echo  A folder picker will open - choose WHERE your project folder
+echo  should be created (e.g. your Documents folder).
 echo(
 pause
-
 call :PICK_FOLDER
 if not defined TARGET goto NO_FOLDER
 
@@ -93,24 +58,52 @@ if exist "%PROJECT%\" (
   goto ASK_NAME
 )
 
-echo(
-echo       Downloading the example project...
-set "TMPCLONE=%TEMP%\bg_tools_src_%RANDOM%%RANDOM%"
-git clone --depth 1 "%REPO%" "%TMPCLONE%"
-if errorlevel 1 goto CLONE_FAIL
+set "RUNTIME=%PROJECT%\.runtime"
+set "WORK=%TEMP%\bg_setup_%RANDOM%%RANDOM%"
+mkdir "%PROJECT%"      2>nul
+mkdir "%RUNTIME%"      2>nul
+mkdir "%WORK%"         2>nul
 
-mkdir "%PROJECT%"
-xcopy "%TMPCLONE%\example\*" "%PROJECT%\" /E /I /Q /Y >nul
-rmdir /s /q "%TMPCLONE%"
+REM ------------------------------------------------------------
+REM  2. Download the portable toolchain
+REM ------------------------------------------------------------
+echo(
+echo [1/4] Downloading portable Node.js %NODE_VER% ...
+powershell -NoProfile -Command "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%NODE_URL%' -OutFile '%WORK%\node.zip'; Expand-Archive -Path '%WORK%\node.zip' -DestinationPath '%WORK%\nodetmp' -Force; $d=Get-ChildItem -Directory '%WORK%\nodetmp' ^| Select-Object -First 1; Move-Item -Path $d.FullName -Destination '%RUNTIME%\node'"
+if errorlevel 1 goto DL_FAIL
+
+echo [2/4] Downloading portable Git %GIT_VER% ...
+powershell -NoProfile -Command "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%GIT_URL%' -OutFile '%WORK%\git.zip'; Expand-Archive -Path '%WORK%\git.zip' -DestinationPath '%RUNTIME%\git' -Force"
+if errorlevel 1 goto DL_FAIL
+
+echo [3/4] Downloading pnpm %PNPM_VER% ...
+powershell -NoProfile -Command "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%PNPM_URL%' -OutFile '%RUNTIME%\pnpm.exe'"
+if errorlevel 1 goto DL_FAIL
+
+REM  Put the portable tools on PATH for the rest of this session.
+set "PATH=%RUNTIME%\node;%RUNTIME%\git\cmd;%RUNTIME%;%PATH%"
+
+REM ------------------------------------------------------------
+REM  3. Create the project from the example
+REM ------------------------------------------------------------
+echo [4/4] Creating your project ...
+powershell -NoProfile -Command "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%REPO_ZIP%' -OutFile '%WORK%\repo.zip'; Expand-Archive -Path '%WORK%\repo.zip' -DestinationPath '%WORK%\repo' -Force"
+if errorlevel 1 goto DL_FAIL
+
+set "EXAMPLE=%WORK%\repo\bg_tools-main\example"
+if not exist "%EXAMPLE%\package.json" goto REPO_FAIL
+xcopy "%EXAMPLE%\*" "%PROJECT%\" /E /I /Q /Y >nul
 
 echo       Initializing a git repository...
 pushd "%PROJECT%"
 git init -q
 
-echo       Installing dependencies (this can take a few minutes -
-echo       it downloads the browser used to render cards)...
-call pnpm install
+echo       Installing dependencies (this downloads the browser used
+echo       to render cards - it can take a few minutes)...
+call "%RUNTIME%\pnpm.exe" install
 popd
+
+rmdir /s /q "%WORK%" 2>nul
 
 echo(
 echo  ============================================================
@@ -119,7 +112,7 @@ echo    Your project is here:
 echo      %PROJECT%
 echo(
 echo    To open the tools later, double-click  run.cmd  in that
-echo    folder, or run  "pnpm run tools"  from it.
+echo    folder. The portable tools live in  .runtime\  there.
 echo  ============================================================
 echo(
 
@@ -132,15 +125,8 @@ goto END
 
 
 REM ============================================================
-REM  Subroutines
+REM  Subroutine: native folder picker
 REM ============================================================
-
-:REFRESH_PATH
-REM  Rebuild PATH from the machine + user registry values, fully
-REM  expanded, so tools installed earlier in this run are found.
-for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "[Environment]::ExpandEnvironmentVariables([Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User'))"`) do set "PATH=%%p"
-goto :eof
-
 :PICK_FOLDER
 set "TARGET="
 for /f "usebackq delims=" %%f in (`powershell -NoProfile -STA -Command "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Choose where to create your board-games project'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($d.SelectedPath) }"`) do set "TARGET=%%f"
@@ -150,25 +136,23 @@ goto :eof
 REM ============================================================
 REM  Error exits
 REM ============================================================
-
-:NO_WINGET
+:DL_FAIL
 echo(
-echo  ERROR: "winget" (App Installer) was not found on this PC.
-echo  It is needed to install Git, Node.js and pnpm.
+echo  ERROR: a download or extraction failed.
+echo  Check your internet connection and try again. If a tool
+echo  version is no longer available, edit the versions near the
+echo  top of this script.
 echo(
-echo  Please install "App Installer" from the Microsoft Store,
-echo  then run this script again. Opening the Store now...
-start "" "ms-windows-store://pdp/?productid=9NBLGGH4NNS1"
-echo(
+if exist "%WORK%" rmdir /s /q "%WORK%" 2>nul
 pause
 goto END
 
-:TOOL_MISSING
+:REPO_FAIL
 echo(
-echo  The required tools were installed but are not yet visible
-echo  in this window. Please CLOSE this window, then download and
-echo  run install.cmd again - it will skip what is already done.
+echo  ERROR: could not find the example project inside the
+echo  downloaded repository archive.
 echo(
+if exist "%WORK%" rmdir /s /q "%WORK%" 2>nul
 pause
 goto END
 
@@ -176,15 +160,6 @@ goto END
 echo(
 echo  No folder was selected - nothing was created. Run the
 echo  installer again when you are ready.
-echo(
-pause
-goto END
-
-:CLONE_FAIL
-echo(
-echo  ERROR: could not download the example project from:
-echo    %REPO%
-echo  Check your internet connection and try again.
 echo(
 pause
 goto END

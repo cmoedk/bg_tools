@@ -14,12 +14,13 @@
 
     <!-- Three-pane workspace -->
     <div id="workspace">
-        <!-- LEFT: projects grouped by status folder -->
+        <!-- LEFT: projects grouped by status folder, + Settings at the bottom -->
         <aside id="projects" class="pane projects-pane">
-            <div id="project-groups"></div>
+            <div id="project-groups" class="project-groups"></div>
+            <button id="settings-btn" class="ghost settings-btn">⚙ Settings</button>
         </aside>
 
-        <!-- MIDDLE: project view / action view / editor (one at a time) -->
+        <!-- MIDDLE: project view / action view / editor / settings (one at a time) -->
         <section id="editor" class="pane editor-pane">
             <div id="mid-empty" class="pane-empty">
                 <p>Select a project on the left, or add one with <strong>+ Add</strong>.</p>
@@ -32,9 +33,14 @@
                         <span id="ov-status" class="status-chip"></span>
                         <span id="ov-name" class="project-name"></span>
                     </div>
-                    <button id="ov-promote-btn">▲ Promote</button>
+                    <div class="view-head-actions">
+                        <button id="ov-promote-btn">▲ Promote</button>
+                        <button id="ov-archive-btn" class="ghost">🗄 Archive</button>
+                    </div>
                 </div>
                 <dl id="ov-details" class="details"></dl>
+                <div id="ov-batches" class="batch-table hidden"></div>
+                <button id="ov-preview-images-btn" class="hidden">🖼 Preview Images</button>
             </div>
 
             <!-- Action view -->
@@ -75,13 +81,27 @@
                 <textarea id="code" class="code-area" spellcheck="false" placeholder="Select a file…"></textarea>
                 <div id="editor-error" class="error"></div>
             </div>
+
+            <!-- Settings -->
+            <div id="mid-settings" class="mid-view hidden">
+                <div class="view-head"><h2>Settings</h2></div>
+                <label class="settings-label" for="settings-image-path">Master image folder</label>
+                <div class="row">
+                    <input id="settings-image-path" type="text" class="name-input" placeholder="e.g. D:\images\master" autocomplete="off">
+                    <button id="settings-save-btn">Save</button>
+                    <span id="settings-status" class="badge"></span>
+                </div>
+                <p class="muted">bg_tools looks here for each game's card images, in a subfolder named after the
+                    project. Saved to <code>config.ini</code> in the project root.</p>
+                <div id="settings-error" class="error"></div>
+            </div>
         </section>
 
         <!-- RIGHT: actions (project/action view) OR preview (editor view) -->
         <aside id="right" class="pane right-pane">
             <div id="right-actions" class="right-section hidden">
                 <div class="section-head"><span>Actions</span></div>
-                <ul id="action-list" class="list"></ul>
+                <div id="action-groups"></div>
                 <p id="action-hint" class="muted"></p>
             </div>
             <div id="right-preview" class="right-section preview-section hidden">
@@ -102,7 +122,16 @@
         </aside>
     </div>
 
-    <!-- Reusable modal (Add Project / Promote / Set image path / Unsaved) -->
+    <!-- Full-screen image grid (Preview Images) -->
+    <div id="image-grid-overlay" class="image-grid-overlay hidden">
+        <div class="image-grid-head">
+            <h2 id="image-grid-title">Images</h2>
+            <button id="image-grid-close" class="ghost">✕ Close</button>
+        </div>
+        <div id="image-grid" class="image-grid"></div>
+    </div>
+
+    <!-- Reusable modal (Add Project / Promote / Unsaved) -->
     <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal" role="dialog" aria-modal="true">
             <h2 id="modal-title">Title</h2>
