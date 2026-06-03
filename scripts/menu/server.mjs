@@ -1065,6 +1065,58 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, { has });
         }
 
+        // Find the image file for a card id (used by the .cards.json5 line preview).
+        if (pathname === '/api/resolve-card-image' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const cardId = url.searchParams.get('cardId') || '';
+            if (!/^[A-Za-z0-9_\-.]+$/.test(cardId)) return sendJson(res, 200, { file: null });
+            let dir;
+            if (url.searchParams.get('source') === 'template') {
+                dir = path.join(DIST_DIR, project.name, 'template_jpg');
+            } else {
+                const img = await readImagePath();
+                if (!img.valid) return sendJson(res, 200, { file: null });
+                dir = path.join(img.path, project.name);
+            }
+            let file = null;
+            try {
+                const entries = await fs.readdir(dir);
+                file = entries.find(n => IMAGE_EXT.has(path.extname(n).toLowerCase()) && n.replace(/\.[^.]+$/, '') === cardId) || null;
+            } catch { /* no folder */ }
+            return sendJson(res, 200, { file });
+        }
+
+        // Resolve the card block a cursor line sits in, within a (live) .cards.text.json5.
+        if (pathname === '/api/text-card' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const content = String(body.content || '');
+            const line = Number(body.line) || 0;
+            let data;
+            try { data = JSON5.parse(content); } catch { return sendJson(res, 200, { cardId: null, error: 'parse' }); }
+            const lines = content.split(/\r?\n/);
+            const lineOf = (id) => {
+                const re = new RegExp(`^\\s*["']?${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?\\s*:`);
+                for (let i = 0; i < lines.length; i++) if (re.test(lines[i])) return i;
+                return -1;
+            };
+            const cards = [];
+            for (const batch of Object.values(data || {})) {
+                if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !batch.cards) continue;
+                for (const [cid, card] of Object.entries(batch.cards)) {
+                    const template = (card && typeof card === 'object' && card.template) ? card.template : batch.template;
+                    const values = (card && typeof card === 'object' && card.values) ? card.values : {};
+                    cards.push({ cardId: cid, template: template || null, values, line: lineOf(cid) });
+                }
+            }
+            if (!cards.length) return sendJson(res, 200, { cardId: null });
+            const above = cards.filter(c => c.line >= 0 && c.line <= line);
+            const chosen = above.length ? above.reduce((a, b) => (b.line > a.line ? b : a)) : cards[0];
+            return sendJson(res, 200, { cardId: chosen.cardId, template: chosen.template, values: chosen.values });
+        }
+
         if (pathname === '/api/template-cards' && req.method === 'GET') {
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });

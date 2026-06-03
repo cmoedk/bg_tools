@@ -19,6 +19,10 @@ let files = [];               // file descriptors (editor)
 let currentFilePath = null;
 let currentFileLang = '';     // '' = base project, 'en'/'da'/... = translation variant
 let currentKind = null;       // 'markdown' | 'json5' | 'text' | 'html' | 'css'
+let currentJson5Mode = null;  // for json5: 'cards' (line→image) | 'text' (cursor→template) | null
+let lastCursorLine = -1;
+let cursorTimer = null;
+let previewSeq = 0;           // guards async previews against stale cursor moves
 let cardHtmlBase = null;      // { name, content } base HTML for card/CSS preview
 let templateCards = [];       // cards (id + values) that use the previewed template
 let selectedCardId = null;    // which card's values fill the template preview
@@ -598,6 +602,17 @@ function kindFromPath(p) {
     return ({ md: 'markdown', json5: 'json5', txt: 'text', html: 'html', css: 'css' })[ext] || null;
 }
 
+// For json5 files, decide which contextual preview to show.
+function json5ModeForPath(p) {
+    if (!/\.json5$/i.test(p)) return null;
+    if (/\.text\.json5$/i.test(p)) return 'text';      // *.cards.text.json5 -> template preview
+    if (/\.cards\.json5$/i.test(p)) return 'cards';    // *.cards.json5 -> per-line master image
+    return null;
+}
+
+function cursorLine() { return code.value.slice(0, code.selectionStart).split('\n').length - 1; }
+function currentLineText() { return code.value.split('\n')[cursorLine()] || ''; }
+
 async function selectFile(path, lang = '') {
     el('file-select').value = `${lang || ''}|${path}`;
     const res = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(path)}&lang=${encodeURIComponent(lang)}`);
@@ -610,6 +625,8 @@ async function selectFile(path, lang = '') {
     el('file-name').readOnly = true;
     code.value = data.content;
     currentKind = kindFromPath(path);
+    currentJson5Mode = json5ModeForPath(path);
+    lastCursorLine = -1;
     dirty = false;
     setSaveStatus('');
     if (currentKind === 'html') {
@@ -646,10 +663,7 @@ async function loadTemplateCards(templatePath, lang) {
 function applyCardValues(html) {
     if (!selectedCardId) return html;
     const card = templateCards.find(c => c.id === selectedCardId);
-    const values = { id: selectedCardId, ...((card && card.values) || {}) };
-    let out = html;
-    for (const [k, v] of Object.entries(values)) out = out.split(`{${k}}`).join(String(v));
-    return out;
+    return substituteValues(html, { id: selectedCardId, ...((card && card.values) || {}) });
 }
 
 function startNewFile() {
@@ -661,6 +675,7 @@ function startNewFile() {
     el('file-name').focus();
     code.value = '';
     currentKind = null;
+    currentJson5Mode = null;
     dirty = false;
     setSaveStatus('');
     renderPreview();
@@ -686,6 +701,7 @@ async function saveFile() {
     dirty = false;
     currentFilePath = name;
     currentKind = kindFromPath(name);
+    currentJson5Mode = json5ModeForPath(name);
     if (currentKind === 'html') cardHtmlBase = { name, content: code.value, path: name, lang: currentFileLang };
     await reloadFiles(name, currentFileLang);
     renderPreview();
@@ -739,6 +755,7 @@ async function resolveCssBase(cssPath, cssLang = '') {
 function hideAllPreviews() {
     el('md-preview').classList.add('hidden');
     el('card-stage').classList.add('hidden');
+    el('line-image-stage').classList.add('hidden');
     el('preview-empty').classList.add('hidden');
     el('card-preview-bar').classList.add('hidden');
     el('preview-note').textContent = '';
@@ -749,7 +766,77 @@ function renderPreview() {
     if (currentKind === 'markdown') renderMarkdownPreview();
     else if (currentKind === 'html') renderCardPreview(code.value);
     else if (currentKind === 'css') renderCssPreview();
+    else if (currentKind === 'json5' && currentJson5Mode === 'cards') renderLineImagePreview();
+    else if (currentKind === 'json5' && currentJson5Mode === 'text') renderTextCardPreview();
     else el('preview-empty').classList.remove('hidden');
+}
+
+// Replace {key} placeholders in template HTML with a card's values.
+function substituteValues(html, values) {
+    let out = html;
+    for (const [k, v] of Object.entries(values)) out = out.split(`{${k}}`).join(String(v));
+    return out;
+}
+
+// .cards.json5: show the master image for the card id on the cursor's line.
+async function renderLineImagePreview() {
+    const seq = ++previewSeq;
+    const line = currentLineText();
+    const candidates = [];
+    const keyM = line.match(/^\s*["']?([A-Za-z0-9_\-.]+)["']?\s*:/);
+    if (keyM && !keyM[1].startsWith('_')) candidates.push(keyM[1]);
+    for (const m of line.matchAll(/"([^"]+)"/g)) candidates.push(m[1]);
+
+    let resolved = null;
+    for (const c of candidates) {
+        const r = await fetch(`/api/resolve-card-image?id=${encodeURIComponent(selectedId)}&cardId=${encodeURIComponent(c)}&source=image`);
+        if (seq !== previewSeq) return; // cursor moved on — abandon
+        if (r.ok) { const d = await r.json(); if (d.file) { resolved = { cardId: c, file: d.file }; break; } }
+    }
+    if (seq !== previewSeq) return;
+    const stage = el('line-image-stage');
+    const img = el('line-image');
+    if (resolved) {
+        img.src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(resolved.file)}?source=image`;
+        stage.classList.remove('hidden');
+        el('preview-note').textContent = resolved.cardId;
+    } else {
+        img.removeAttribute('src');
+        stage.classList.add('hidden');
+        el('preview-empty').classList.remove('hidden');
+        el('preview-note').textContent = candidates.length ? `No image for “${candidates[0]}”` : 'No card on this line';
+    }
+}
+
+// .cards.text.json5: render the template of the card block the cursor is in.
+async function renderTextCardPreview() {
+    const seq = ++previewSeq;
+    const res = await fetch('/api/text-card', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId, content: code.value, line: cursorLine() }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (seq !== previewSeq) return;
+    if (!res.ok || !d.cardId || !d.template) {
+        el('preview-empty').classList.remove('hidden');
+        el('preview-note').textContent = d && d.error === 'parse'
+            ? 'Fix the JSON5 to preview a card'
+            : 'Place the cursor inside a card block to preview it';
+        return;
+    }
+    const tr = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent('design/' + d.template)}&lang=`);
+    if (seq !== previewSeq) return;
+    if (!tr.ok) {
+        el('preview-empty').classList.remove('hidden');
+        el('preview-note').textContent = `Template not found: design/${d.template}`;
+        return;
+    }
+    const html = (await tr.json()).content;
+    if (seq !== previewSeq) return;
+    el('card-stage').classList.remove('hidden');
+    el('card-preview').srcdoc = injectBase(substituteValues(html, { id: d.cardId, ...(d.values || {}) }));
+    el('preview-note').textContent = `card: ${d.cardId} · ${d.template}`;
+    fitPreview();
 }
 
 async function renderMarkdownPreview() {
@@ -829,11 +916,17 @@ window.addEventListener('resize', fitPreview);
 
 function schedulePreview() {
     clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => {
-        if (currentKind === 'markdown') renderMarkdownPreview();
-        else if (currentKind === 'html') renderCardPreview(code.value);
-        else if (currentKind === 'css') renderCssPreview();
-    }, 250);
+    previewTimer = setTimeout(renderPreview, 250);
+}
+
+// Re-run the contextual json5 previews when the cursor moves to a different line.
+function scheduleCursorPreview() {
+    if (currentKind !== 'json5' || !currentJson5Mode) return;
+    const ln = cursorLine();
+    if (ln === lastCursorLine) return;
+    lastCursorLine = ln;
+    clearTimeout(cursorTimer);
+    cursorTimer = setTimeout(renderPreview, 120);
 }
 
 // --- Add project ---
@@ -1027,6 +1120,8 @@ el('file-select').addEventListener('change', async () => {
     selectFile(v.slice(i + 1), v.slice(0, i));
 });
 code.addEventListener('input', () => { dirty = true; setSaveStatus(''); schedulePreview(); });
+code.addEventListener('keyup', scheduleCursorPreview);
+code.addEventListener('click', scheduleCursorPreview);
 code.addEventListener('scroll', () => {
     if (currentKind !== 'markdown') return;
     const denom = code.scrollHeight - code.clientHeight;

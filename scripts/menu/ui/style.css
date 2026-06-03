@@ -403,6 +403,24 @@ button.ghost:hover { background: var(--panel-2); color: var(--text); }
     transform-origin: top left;
 }
 
+/* Per-line master-image preview (when editing .cards.json5) */
+.line-image-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    overflow: auto;
+}
+.line-image-stage img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    background: #8a8f98;
+    border-radius: 4px;
+}
+
 /* Markdown preview fills the whole pane (not card-shaped) */
 .md-preview-pane { padding: 0; }
 
@@ -496,6 +514,7 @@ button.ghost:hover { background: var(--panel-2); color: var(--text); }
     overflow-y: auto;
 }
 .project-link {
+    flex: 0 0 auto; /* don't let many links squish to fit max-height — overflow & scroll instead */
     padding: 1px 2px;
     font-size: 14px;
     line-height: 1.5;
