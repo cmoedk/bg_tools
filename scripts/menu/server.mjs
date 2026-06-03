@@ -64,7 +64,7 @@ const MENU_OPTIONS = [
         label: 'Generate rules PDF',
         group: 'Rules',
         script: path.join(PROJECT_ROOT, 'generate_rules_pdf.js'),
-        description: 'Generates a PDF of the rules (runs generate_rules_pdf.js at the project root).',
+        description: 'Generates a PDF of the rules.',
     },
     {
         label: 'Generate Print-and-Play PDF',

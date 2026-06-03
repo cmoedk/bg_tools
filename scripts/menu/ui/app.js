@@ -392,8 +392,9 @@ function renderImageGrid() {
 
     const grid = el('image-grid');
     grid.innerHTML = '';
+    gridCells = [];
     const idp = idPathFor(selectedId);
-    gridImages.forEach((im) => {
+    gridImages.forEach((im, index) => {
         const cell = document.createElement('figure');
         cell.className = 'image-cell';
         const img = document.createElement('img');
@@ -402,8 +403,9 @@ function renderImageGrid() {
         img.alt = im.id;
         img.title = 'Click to view full size';
         img.style.cursor = 'zoom-in';
-        img.onclick = () => toggleImageDetail(im);
+        img.onclick = () => toggleImageDetail(index);
         cell.appendChild(img);
+        gridCells.push(cell);
 
         const cap = document.createElement('figcaption');
         const idEl = document.createElement('span');
@@ -437,6 +439,8 @@ function renderImageGrid() {
         cell.appendChild(cap);
         grid.appendChild(cell);
     });
+    detailIndex = -1;
+    detailFile = null;
     updateGridFoot();
 }
 
@@ -458,19 +462,46 @@ function updateGridFoot() {
     el('image-grid-foot').textContent = `${gridImages.length} unique · ${total} total`;
 }
 
-// Right-side full-size detail panel; clicking the same image again closes it.
+// Right-side full-size detail panel. Clicking the same thumbnail again closes it;
+// arrow keys move the selection; the shown thumbnail is highlighted.
+let gridCells = [];
+let detailIndex = -1;
 let detailFile = null;
-function toggleImageDetail(im) {
-    if (detailFile === im.file) { closeImageDetail(); return; }
+
+function toggleImageDetail(index) {
+    if (detailIndex === index) { closeImageDetail(); return; }
+    showImageDetail(index);
+}
+function showImageDetail(index) {
+    if (index < 0 || index >= gridImages.length) return;
+    detailIndex = index;
+    const im = gridImages[index];
     detailFile = im.file;
     el('image-detail-img').src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(im.file)}?source=${gridSource}`;
     el('image-detail-name').textContent = im.file;
     el('image-detail').classList.remove('hidden');
+    gridCells.forEach((c, i) => c.classList.toggle('selected', i === index));
+    if (gridCells[index]) gridCells[index].scrollIntoView({ block: 'nearest' });
 }
 function closeImageDetail() {
+    detailIndex = -1;
     detailFile = null;
     el('image-detail').classList.add('hidden');
     el('image-detail-img').removeAttribute('src');
+    gridCells.forEach(c => c.classList.remove('selected'));
+}
+// Number of thumbnails in the first grid row (for up/down navigation).
+function gridColumns() {
+    if (!gridCells.length) return 1;
+    const top = gridCells[0].offsetTop;
+    let n = 0;
+    for (const c of gridCells) { if (c.offsetTop === top) n++; else break; }
+    return Math.max(1, n);
+}
+function moveImageDetail(delta) {
+    if (detailIndex < 0) return;
+    const next = detailIndex + delta;
+    if (next >= 0 && next < gridImages.length) showImageDetail(next);
 }
 
 function closeImageGrid() {
@@ -479,6 +510,7 @@ function closeImageGrid() {
     el('image-grid-foot').textContent = '';
     closeImageDetail();
     gridImages = [];
+    gridCells = [];
 }
 
 // --- Native folder picker for Settings ---
@@ -491,6 +523,8 @@ async function pickFolder() {
 
 // --- Settings ---
 function openSettings() {
+    selectedId = null;       // Settings is not a project — clear the left-list highlight.
+    renderProjects();
     el('settings-image-path').value = config.imagePath || '';
     el('settings-error').textContent = '';
     setSettingsStatus('');
@@ -1025,6 +1059,11 @@ document.addEventListener('keydown', (e) => {
         if (currentView !== 'editor') return;
         e.preventDefault();
         saveFile();
+    }
+    // Arrow-key navigation of the image preview detail panel.
+    if (detailIndex >= 0 && !el('image-grid-overlay').classList.contains('hidden')) {
+        const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -gridColumns(), ArrowDown: gridColumns() }[e.key];
+        if (delta !== undefined) { e.preventDefault(); moveImageDetail(delta); return; }
     }
     if (e.key === 'Escape') {
         if (!el('image-detail').classList.contains('hidden')) closeImageDetail();

@@ -2,6 +2,13 @@
 
 ## 3 June 2026
 
+- ~~No white background on image preview images (stay gray, so you can see the edges of the image)~~
+- ~~When previewing an image, highlight the thumbnail of the previewd image. Allow arrow keys to go forward/backward/upward/downward in the preview pane.~~
+- ~~In image preview and other places, Open folder is not a link or button (no hover state)~~
+- ~~Generate rules pdf: remove information about which script it runs (in parenthesis)~~
+- ~~When clicking settings, remove selected project highlight.~~
+
+
 - ~~In Image preview, when clicking an image, open a right panel with the image to full-size (or window height - whichever it hits first.). The panel should have a close button, or close when the same image is clicked again.~~
 - ~~Templates actions: Remove (from templates) in button name. Add Generate Tabletop Simulator Files. Add Generate Boardgamemakers.com files.~~
 - ~~In Actions view, Run should be Generate. Remove the Clear button. Show the console view before clicking any buttons, with an inline: "Console output will appear here" or something like that (helpful).~~
