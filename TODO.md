@@ -2,6 +2,20 @@
 
 ## 3 June 2026
 
+- ~~In Image preview, when clicking an image, open a right panel with the image to full-size (or window height - whichever it hits first.). The panel should have a close button, or close when the same image is clicked again.~~
+- ~~Templates actions: Remove (from templates) in button name. Add Generate Tabletop Simulator Files. Add Generate Boardgamemakers.com files.~~
+- ~~In Actions view, Run should be Generate. Remove the Clear button. Show the console view before clicking any buttons, with an inline: "Console output will appear here" or something like that (helpful).~~
+- ~~After generating things, have a link to the generated file/folder as well as its parent folder (_dist project folder) between the Run button and the Console view.~~
+- ~~Generate rules HTML: In Action view, add to description "using Github markdown style". Create a link to the generated _dist folder (or _dist/<project>) if no generated content exist yet.~~
+- ~~Images/Templates Generate Print-and-Play PDF: Generated PDFS should be between Run and Console. The first line "Running...." does not appear until the script has finished - show that line immediately.~~
+- ~~Images/Templates Generate TTS: Description: Inform that the filenames will contain the exact rows and card amounts for each file, for use in the Tabletop Simulator Application.~~
+- ~~Images/Templates Generate Boardgamemakers.com: Inform that the images will be slightly changed (and how) for easy bulk upload to boardgamemakers.com~~
+- ~~Templates: Generate JPGS: Do not mention Puppeteer. If these files exist, then pressing Generate PDF/TTS/Boardgamemakers should use those, instead of generating new files from template. When pressing Run in those three actions, the user should be queried if they want to use the jpgs from that folder, or generate anew.~~
+- ~~When previewing images, add a link to the parent folder at the top: "Images - <project title> (<amount>) - <link to parent folder>".~~
+- ~~In the project overview, add a Template Images similar to the Images item, if those exist as separate jpgs (from the Generate JPGS option)~~
+
+
+
 - ~~Saved info (after pressing save in settings) is not centered and too much border radius.~~
 - ~~In previewing images, you should be able to change the amount (mod). Also should just display images in .cards.json5, not all images in folder.~~
 - ~~Folder names with .en f.ex. represents translations. They should be part of the project without the suffix, and their files in the Edit Files have "(en)" after the file name.~~

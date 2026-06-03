@@ -28,10 +28,12 @@ scripts/
 
     generate_html.mjs               rules markdown   -> _dist/<game>/<game>.html
     generate_pnp_pdf.mjs            card images      -> _dist/<game>/pnp_pdf  (print-and-play PDF)
-    generate_test_pnp_pdf.mjs       HTML templates   -> _dist/<game>/test     (print-and-play PDF)
-    generate_jpgs_from_templates.mjs HTML templates  -> _dist/<game>/template_jpg (one JPG per card)
     generate_tts_files.mjs          card images      -> _dist/<game>/tts      (Tabletop Simulator sheets)
     generate_bgm_files.mjs          card images      -> _dist/<game>/bgm      (boardgamemakers.com files)
+    generate_jpgs_from_templates.mjs HTML templates  -> _dist/<game>/template_jpg (one JPG per card)
+    generate_template_pnp_pdf.mjs   HTML templates   -> _dist/<game>/test     (print-and-play PDF)
+    generate_template_tts_files.mjs HTML templates   -> _dist/<game>/tts      (Tabletop Simulator sheets)
+    generate_template_bgm_files.mjs HTML templates   -> _dist/<game>/bgm      (boardgamemakers.com files)
 
   tools/                 Misc standalone tools (e.g. compare_images.py)
 ```

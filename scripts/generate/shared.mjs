@@ -21,12 +21,14 @@ import { DEFAULT_BACK_FILENAME_APPEND, DEFAULT_CARD_MM_HEIGHT, DEFAULT_CARD_MM_W
  * }}
  */
 export function parseGeneratorArgs() {
-    const [, , masterImagePath, gameFolder, gameName] = process.argv;
+    const [, , masterImagePath, gameFolder, gameName, imageFolderOverride] = process.argv;
     return {
         masterImagePath,
         gameFolder,
         gameName,
-        imageFolderPath: `${masterImagePath}/${gameName}`,
+        // An explicit 4th argument overrides where card images are read from (used to
+        // feed the image generators with the JPGs rendered from templates).
+        imageFolderPath: imageFolderOverride || `${masterImagePath}/${gameName}`,
     };
 }
 

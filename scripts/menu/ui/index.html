@@ -39,7 +39,10 @@
                 </div>
                 <dl id="ov-details" class="details"></dl>
                 <div id="ov-batches" class="batch-table hidden"></div>
-                <button id="ov-preview-images-btn" class="hidden">🖼 Preview Images</button>
+                <div class="ov-actions">
+                    <button id="ov-preview-images-btn" class="hidden">🖼 Preview Images</button>
+                    <button id="ov-preview-template-btn" class="ghost hidden">🖼 Preview Template Images</button>
+                </div>
             </div>
 
             <!-- Action view -->
@@ -50,16 +53,19 @@
                 </div>
                 <p id="act-desc" class="action-description"></p>
                 <div class="row run-row">
-                    <button id="run-btn">Run</button>
+                    <button id="run-btn">Generate</button>
                     <span id="run-status" class="badge"></span>
                     <button id="stop-btn" class="ghost hidden">Stop</button>
-                    <button id="clear-btn" class="ghost">Clear</button>
                 </div>
-                <pre id="console" class="console hidden"></pre>
-                <div id="pdf-results" class="pdf-results hidden">
-                    <h3>Generated PDFs</h3>
-                    <ul id="pdf-list" class="pdf-list"></ul>
+                <div id="act-outputs" class="act-outputs">
+                    <p id="act-output" class="muted">Output: <code id="act-output-path"></code>
+                        <a id="act-open-dist" class="edit-link">📂 Open folder</a></p>
+                    <div id="pdf-results" class="pdf-results hidden">
+                        <h3>Generated PDFs</h3>
+                        <ul id="pdf-list" class="pdf-list"></ul>
+                    </div>
                 </div>
+                <pre id="console" class="console"></pre>
             </div>
 
             <!-- File editor -->
@@ -132,7 +138,16 @@
             <h2 id="image-grid-title">Images</h2>
             <button id="image-grid-close" class="ghost">✕ Close</button>
         </div>
-        <div id="image-grid" class="image-grid"></div>
+        <div class="image-grid-body">
+            <div id="image-grid" class="image-grid"></div>
+            <aside id="image-detail" class="image-detail hidden">
+                <div class="image-detail-head">
+                    <span id="image-detail-name" class="muted"></span>
+                    <button id="image-detail-close" class="ghost">✕</button>
+                </div>
+                <div class="image-detail-stage"><img id="image-detail-img" alt=""></div>
+            </aside>
+        </div>
         <div id="image-grid-foot" class="image-grid-foot"></div>
     </div>
 

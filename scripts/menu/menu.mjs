@@ -22,7 +22,7 @@ const MENU_OPTIONS = [
     { label: 'Generate Print-and-Play PDF', script: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs') },
     { label: 'Generate Tabletop Simulator Files', script: path.join(GENERATE_DIR, 'generate_tts_files.mjs') },
     { label: 'Generate Boardgamemakers.com files', script: path.join(GENERATE_DIR, 'generate_bgm_files.mjs') },
-    { label: 'Generate Print-and-Play Test PDF (text only)', script: path.join(GENERATE_DIR, 'generate_test_pnp_pdf.mjs') },
+    { label: 'Generate Print-and-Play Test PDF (text only)', script: path.join(GENERATE_DIR, 'generate_template_pnp_pdf.mjs') },
 ];
 
 // Reusable readline interface for question prompts only

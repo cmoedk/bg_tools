@@ -58,7 +58,7 @@ const MENU_OPTIONS = [
         label: 'Generate rules HTML',
         group: 'Rules',
         script: path.join(GENERATE_DIR, 'generate_html.mjs'),
-        description: "Renders the project's rules markdown into a styled, standalone HTML file in _dist.",
+        description: "Renders the project's rules markdown into a styled, standalone HTML file in _dist, using GitHub markdown style.",
     },
     {
         label: 'Generate rules PDF',
@@ -76,25 +76,40 @@ const MENU_OPTIONS = [
         label: 'Generate Tabletop Simulator Files',
         group: 'Images',
         script: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
-        description: 'Creates Tabletop Simulator deck image sheets from the card images.',
+        description: 'Packs the card images into Tabletop Simulator deck sheets. Each filename encodes the card count, rows and columns, for import into the Tabletop Simulator application.',
     },
     {
         label: 'Generate Boardgamemakers.com files',
         group: 'Images',
         script: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
-        description: 'Creates card front/back image files formatted for boardgamemakers.com.',
+        description: 'Writes each card front/back image for boardgamemakers.com. Each image is slightly altered (~10% of its pixels nudged ±1% in brightness) so identical cards get unique file content for bulk upload.',
     },
     {
-        label: 'Generate Print-and-Play PDF (from templates)',
+        label: 'Generate Print-and-Play PDF',
         group: 'Templates',
-        script: path.join(GENERATE_DIR, 'generate_test_pnp_pdf.mjs'),
-        description: 'Renders each card from its HTML template (in design/) with Puppeteer and assembles a print-and-play PDF.',
+        script: path.join(GENERATE_DIR, 'generate_template_pnp_pdf.mjs'),
+        imageScript: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs'),
+        description: 'Renders each card from its HTML template (in design/) and assembles a print-and-play PDF.',
     },
     {
-        label: 'Generate JPGs (from templates)',
+        label: 'Generate JPGs',
         group: 'Templates',
         script: path.join(GENERATE_DIR, 'generate_jpgs_from_templates.mjs'),
-        description: 'Renders each card from its HTML template (in design/) with Puppeteer and saves one JPG per card to _dist.',
+        description: 'Renders each card from its HTML template (in design/) and saves one JPG per card to _dist/<project>/template_jpg.',
+    },
+    {
+        label: 'Generate Tabletop Simulator Files',
+        group: 'Templates',
+        script: path.join(GENERATE_DIR, 'generate_template_tts_files.mjs'),
+        imageScript: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
+        description: 'Renders each card from its HTML template (in design/) and packs them into Tabletop Simulator deck sheets. Each filename encodes the card count, rows and columns, for the Tabletop Simulator application.',
+    },
+    {
+        label: 'Generate Boardgamemakers.com files',
+        group: 'Templates',
+        script: path.join(GENERATE_DIR, 'generate_template_bgm_files.mjs'),
+        imageScript: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
+        description: 'Renders each card from its HTML template (in design/) and writes card front/back files for boardgamemakers.com. Each image is slightly altered (~10% of its pixels nudged ±1% in brightness) so identical cards get unique content for bulk upload.',
     },
 ];
 
@@ -401,10 +416,15 @@ function cardBackIds(data) {
 
 // Full image list for the Preview Images grid. When a .cards.json5 exists, only
 // images referenced by it (card faces + backs) are returned; otherwise all images.
-async function listProjectImages(project) {
-    const img = await readImagePath();
-    if (!img.valid) return { configured: false, images: [] };
-    const dir = path.join(img.path, project.name);
+async function listProjectImages(project, source = 'image') {
+    let dir;
+    if (source === 'template') {
+        dir = path.join(DIST_DIR, project.name, 'template_jpg');
+    } else {
+        const img = await readImagePath();
+        if (!img.valid) return { configured: false, images: [] };
+        dir = path.join(img.path, project.name);
+    }
     let entries;
     try { entries = await fs.readdir(dir, { withFileTypes: true }); }
     catch { return { configured: true, hasFolder: false, images: [] }; }
@@ -482,14 +502,21 @@ async function projectOverview(project) {
     const showAssets = !(project.status === '1_idea' || project.status === '2_draft');
     let cards = null;
     let images = { configured: false };
+    let templateImages = { exists: false, count: 0 };
     if (showAssets) {
         cards = await readCardsOverview(project);
         images = await imagesSummary(project);
+        // JPGs previously rendered from templates (Generate JPGs -> _dist/<project>/template_jpg).
+        try {
+            const tdir = path.join(DIST_DIR, project.name, 'template_jpg');
+            const count = (await fs.readdir(tdir)).filter(n => IMAGE_EXT.has(path.extname(n).toLowerCase())).length;
+            if (count) templateImages = { exists: true, count };
+        } catch { /* none */ }
     }
 
     return {
         id: project.id, name: project.name, status: project.status,
-        canGenerate: project.canGenerate, showAssets, createdMs, cards, images,
+        canGenerate: project.canGenerate, showAssets, createdMs, cards, images, templateImages,
     };
 }
 
@@ -861,7 +888,7 @@ function serveStatic(res, urlPath) {
 }
 
 // ---------- Script runner (Server-Sent Events) ----------
-async function runScriptSSE(res, { optionIndex, project }) {
+async function runScriptSSE(res, { optionIndex, project, useJpgs }) {
     res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache',
@@ -879,8 +906,15 @@ async function runScriptSSE(res, { optionIndex, project }) {
         sse('done', { code: 1 });
         return res.end();
     }
-    if (!existsSync(option.script)) {
-        sse('output', { text: `ERROR: Script not found:\n${option.script}\n` });
+    // When asked, run the image-based generator against the JPGs previously
+    // rendered from templates (in _dist/<project>/template_jpg) instead of
+    // re-rendering from the HTML templates.
+    const script = useJpgs && option.imageScript ? option.imageScript : option.script;
+    const extraArgs = useJpgs && option.imageScript
+        ? [path.resolve(DIST_DIR, project.name, 'template_jpg')]
+        : [];
+    if (!existsSync(script)) {
+        sse('output', { text: `ERROR: Script not found:\n${script}\n` });
         sse('done', { code: 1 });
         return res.end();
     }
@@ -889,7 +923,7 @@ async function runScriptSSE(res, { optionIndex, project }) {
 
     const pdfsBefore = await scanPdfs();
 
-    const child = spawn('node', [option.script, IMAGE_PATH, project.relPath, project.name], {
+    const child = spawn('node', [script, IMAGE_PATH, project.relPath, project.name, ...extraArgs], {
         cwd: PROJECT_ROOT,
         env: process.env,
     });
@@ -928,9 +962,39 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, {
                 imagePath: image.path,
                 imagePathValid: image.valid,
-                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '', group: o.group || 'Other' })),
+                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '', group: o.group || 'Other', hasImageAlt: !!o.imageScript })),
                 statusFolders: STATUS_FOLDERS.map(f => ({ ...f, canGenerate: GENERATE_FOLDERS.has(f.key) })),
             });
+        }
+
+        // Open a project's _dist output folder in the file explorer (Windows).
+        if (pathname === '/api/open-dist' && req.method === 'GET') {
+            if (process.platform !== 'win32') return sendJson(res, 400, { error: 'Opening folders is only available on Windows.' });
+            const project = resolveProject(url.searchParams.get('id'));
+            let dir = DIST_DIR;
+            if (project && existsSync(path.join(DIST_DIR, project.name))) dir = path.join(DIST_DIR, project.name);
+            try { await fs.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
+            spawn('explorer', [path.resolve(dir)], { detached: true }).unref();
+            return sendJson(res, 200, { ok: true, dir: path.relative(PROJECT_ROOT, dir).replace(/\\/g, '/') });
+        }
+
+        // Open a project's image source folder in the file explorer (Windows).
+        // source=template -> the rendered template JPGs in _dist; else the master image folder.
+        if (pathname === '/api/open-images' && req.method === 'GET') {
+            if (process.platform !== 'win32') return sendJson(res, 400, { error: 'Opening folders is only available on Windows.' });
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            let dir;
+            if (url.searchParams.get('source') === 'template') {
+                dir = path.join(DIST_DIR, project.name, 'template_jpg');
+            } else {
+                const img = await readImagePath();
+                if (!img.valid) return sendJson(res, 400, { error: 'Master image folder is not set.' });
+                dir = path.join(img.path, project.name);
+            }
+            try { await fs.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
+            spawn('explorer', [path.resolve(dir)], { detached: true }).unref();
+            return sendJson(res, 200, { ok: true });
         }
 
         // Native folder picker (Windows). The server runs on the user's own
@@ -987,7 +1051,18 @@ const server = http.createServer(async (req, res) => {
         if (pathname === '/api/project-images' && req.method === 'GET') {
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
-            return sendJson(res, 200, await listProjectImages(project));
+            return sendJson(res, 200, await listProjectImages(project, url.searchParams.get('source') || 'image'));
+        }
+
+        if (pathname === '/api/has-template-jpgs' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            let has = false;
+            try {
+                const dir = path.join(DIST_DIR, project.name, 'template_jpg');
+                has = (await fs.readdir(dir)).some(n => /\.jpg$/i.test(n));
+            } catch { /* none */ }
+            return sendJson(res, 200, { has });
         }
 
         if (pathname === '/api/template-cards' && req.method === 'GET') {
@@ -1108,12 +1183,18 @@ const server = http.createServer(async (req, res) => {
             const id = `${decodeURIComponent(rest[0])}/${decodeURIComponent(rest[1])}`;
             const fileName = rest.slice(2).map(decodeURIComponent).join('/');
             const project = resolveProject(id);
-            const img = await readImagePath();
-            if (!project || !img.valid || fileName.includes('..') || !IMAGE_EXT.has(path.extname(fileName).toLowerCase())) {
+            if (!project || fileName.includes('..') || !IMAGE_EXT.has(path.extname(fileName).toLowerCase())) {
                 res.writeHead(404).end('Not found');
                 return;
             }
-            const imgDir = path.join(img.path, project.name);
+            let imgDir;
+            if (url.searchParams.get('source') === 'template') {
+                imgDir = path.join(DIST_DIR, project.name, 'template_jpg');
+            } else {
+                const img = await readImagePath();
+                if (!img.valid) { res.writeHead(404).end('Not found'); return; }
+                imgDir = path.join(img.path, project.name);
+            }
             const filePath = path.join(imgDir, fileName);
             if (!filePath.startsWith(imgDir) || !existsSync(filePath) || !(await fs.stat(filePath)).isFile()) {
                 res.writeHead(404).end('Not found');
@@ -1129,18 +1210,24 @@ const server = http.createServer(async (req, res) => {
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
             if (!project.canGenerate) return sendJson(res, 400, { error: 'Generators are only available for test/playtest/prototype projects.' });
-            const image = await readImagePath();
-            if (!image.valid) {
-                res.writeHead(400, { 'Content-Type': 'text/event-stream' });
-                res.write('event: output\n');
-                res.write(`data: ${JSON.stringify({ text: 'ERROR: Image path is not set or invalid.\n' })}\n\n`);
-                res.write('event: done\n');
-                res.write(`data: ${JSON.stringify({ code: 1 })}\n\n`);
-                return res.end();
-            }
-            IMAGE_PATH = image.path;
             const optionIndex = Number(url.searchParams.get('option'));
-            return runScriptSSE(res, { optionIndex, project });
+            const option = MENU_OPTIONS[optionIndex];
+            const useJpgs = url.searchParams.get('source') === 'jpgs' && !!(option && option.imageScript);
+            // Rendering from pre-made template JPGs reads from _dist, so it doesn't
+            // need the master image folder; every other run does.
+            if (!useJpgs) {
+                const image = await readImagePath();
+                if (!image.valid) {
+                    res.writeHead(400, { 'Content-Type': 'text/event-stream' });
+                    res.write('event: output\n');
+                    res.write(`data: ${JSON.stringify({ text: 'ERROR: Image path is not set or invalid.\n' })}\n\n`);
+                    res.write('event: done\n');
+                    res.write(`data: ${JSON.stringify({ code: 1 })}\n\n`);
+                    return res.end();
+                }
+                IMAGE_PATH = image.path;
+            }
+            return runScriptSSE(res, { optionIndex, project, useJpgs });
         }
 
         // --- Serve generated PDFs from _dist ---

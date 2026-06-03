@@ -147,6 +147,7 @@ function renderOverview(ov) {
     batchHost.classList.add('hidden');
     batchHost.innerHTML = '';
     el('ov-preview-images-btn').classList.add('hidden');
+    el('ov-preview-template-btn').classList.add('hidden');
 
     // Cards / Images only matter once a game has components (3_test onward).
     if (ov.showAssets) {
@@ -158,12 +159,19 @@ function renderOverview(ov) {
         else if (!ov.images.hasFolder) row('Images', `No folder “${ov.name}” in the image path`);
         else row('Images', `${ov.images.count} image(s) found`);
 
+        if (ov.templateImages && ov.templateImages.exists) {
+            row('Template images', `${ov.templateImages.count} JPG(s) in _dist/${ov.name}/template_jpg`);
+        }
+
         if (ov.cards && !ov.cards.error && ov.cards.batches && ov.cards.batches.length) {
             renderBatchTable(batchHost, ov.cards);
             batchHost.classList.remove('hidden');
         }
         if (ov.images.configured && ov.images.hasFolder && ov.images.count > 0) {
             el('ov-preview-images-btn').classList.remove('hidden');
+        }
+        if (ov.templateImages && ov.templateImages.exists) {
+            el('ov-preview-template-btn').classList.remove('hidden');
         }
     }
 }
@@ -236,7 +244,7 @@ function openAction(index) {
     const a = config.actions[index];
     el('act-title').textContent = a.label;
     el('act-desc').textContent = a.description || '';
-    consoleEl.classList.add('hidden');
+    el('act-output-path').textContent = `_dist/${currentProject.name}/`;
     consoleEl.textContent = '';
     el('pdf-results').classList.add('hidden');
     el('pdf-list').innerHTML = '';
@@ -245,32 +253,58 @@ function openAction(index) {
     const runBtn = el('run-btn');
     runBtn.classList.remove('hidden');
     runBtn.disabled = false;
-    runBtn.textContent = 'Run';
+    runBtn.textContent = 'Generate';
     setView('action');
 }
 
-function runAction() {
+// Decide whether to run from templates or from previously-rendered JPGs (item 13).
+async function startRun() {
     if (currentActionIndex === null || !currentProject || !currentProject.canGenerate) return;
-    if (!config.imagePathValid) { openSettings(); return; }
+    const action = config.actions[currentActionIndex];
+    if (action.hasImageAlt) {
+        let has = false;
+        try {
+            const r = await fetch(`/api/has-template-jpgs?id=${encodeURIComponent(selectedId)}`);
+            if (r.ok) has = (await r.json()).has;
+        } catch { /* ignore */ }
+        if (has) {
+            openModal({
+                title: 'Use existing template JPGs?',
+                body: `<p>This project has JPGs already rendered from templates in
+                    <code>_dist/${escapeHtml(currentProject.name)}/template_jpg</code>.</p>
+                    <p>Generate from those (fast), or render anew from the HTML templates?</p>`,
+                buttons: [
+                    btnCancel(),
+                    btnGhost('Render anew', () => { closeModal(); runAction(''); }),
+                    btnPrimary('Use JPGs', () => { closeModal(); runAction('jpgs'); }),
+                ],
+            });
+            return;
+        }
+    }
+    runAction('');
+}
+
+function runAction(source) {
+    if (currentActionIndex === null || !currentProject || !currentProject.canGenerate) return;
+    // Rendering from existing JPGs reads _dist, so it doesn't need the image folder.
+    if (source !== 'jpgs' && !config.imagePathValid) { openSettings(); return; }
     if (currentStream) currentStream.close();
     const action = config.actions[currentActionIndex];
 
-    consoleEl.classList.remove('hidden');
     consoleEl.textContent = '';
     el('pdf-results').classList.add('hidden');
     el('pdf-list').innerHTML = '';
     setRunStatus('running');
     el('run-btn').classList.add('hidden');
     stopBtn.classList.remove('hidden');
+    // Show progress immediately, rather than waiting for the first server event.
+    appendConsole(`▶ Running: ${action.label}  [${currentProject.name}]${source === 'jpgs' ? '  (from existing JPGs)' : ''}\n\n`);
 
-    const url = `/api/run?option=${currentActionIndex}&id=${encodeURIComponent(selectedId)}`;
+    const url = `/api/run?option=${currentActionIndex}&id=${encodeURIComponent(selectedId)}${source ? `&source=${source}` : ''}`;
     const es = new EventSource(url);
     currentStream = es;
 
-    es.addEventListener('start', (e) => {
-        const d = JSON.parse(e.data);
-        appendConsole(`▶ Running: ${d.label}  [${d.folder}]\n\n`);
-    });
     es.addEventListener('output', (e) => appendConsole(JSON.parse(e.data).text));
     es.addEventListener('error', (e) => { if (e.data) appendConsole(JSON.parse(e.data).message + '\n'); });
     es.addEventListener('pdfs', (e) => renderPdfs(JSON.parse(e.data).pdfs));
@@ -298,7 +332,7 @@ function finishRun() {
     const runBtn = el('run-btn');
     runBtn.classList.remove('hidden');
     runBtn.disabled = false;
-    runBtn.textContent = 'Run again';
+    runBtn.textContent = 'Generate again';
 }
 
 function renderPdfs(pdfs) {
@@ -335,17 +369,27 @@ async function archiveProject() {
 
 // --- Preview Images (full-screen grid) ---
 let gridImages = [];
-async function previewImages() {
-    const res = await fetch(`/api/project-images?id=${encodeURIComponent(selectedId)}`);
+let gridSource = 'image';
+async function previewImages(source = 'image') {
+    gridSource = source;
+    const res = await fetch(`/api/project-images?id=${encodeURIComponent(selectedId)}&source=${source}`);
     const data = await res.json();
-    if (!res.ok || !data.images || !data.images.length) { openAlert('Images', 'No card images found for this project.'); return; }
+    if (!res.ok || !data.images || !data.images.length) { openAlert('Images', 'No images found for this project.'); return; }
     gridImages = data.images;
     renderImageGrid();
     el('image-grid-overlay').classList.remove('hidden');
 }
 
 function renderImageGrid() {
-    el('image-grid-title').textContent = `Images — ${currentProject.name} (${gridImages.length})`;
+    const title = el('image-grid-title');
+    const kind = gridSource === 'template' ? 'Template images' : 'Images';
+    title.textContent = `${kind} — ${currentProject.name} (${gridImages.length}) — `;
+    const link = document.createElement('a');
+    link.className = 'edit-link';
+    link.textContent = '📂 Open folder';
+    link.onclick = () => fetch(`/api/open-images?id=${encodeURIComponent(selectedId)}&source=${gridSource}`);
+    title.appendChild(link);
+
     const grid = el('image-grid');
     grid.innerHTML = '';
     const idp = idPathFor(selectedId);
@@ -354,8 +398,11 @@ function renderImageGrid() {
         cell.className = 'image-cell';
         const img = document.createElement('img');
         img.loading = 'lazy';
-        img.src = `/api/image/${idp}/${encodeURIComponent(im.file)}`;
+        img.src = `/api/image/${idp}/${encodeURIComponent(im.file)}?source=${gridSource}`;
         img.alt = im.id;
+        img.title = 'Click to view full size';
+        img.style.cursor = 'zoom-in';
+        img.onclick = () => toggleImageDetail(im);
         cell.appendChild(img);
 
         const cap = document.createElement('figcaption');
@@ -411,10 +458,26 @@ function updateGridFoot() {
     el('image-grid-foot').textContent = `${gridImages.length} unique · ${total} total`;
 }
 
+// Right-side full-size detail panel; clicking the same image again closes it.
+let detailFile = null;
+function toggleImageDetail(im) {
+    if (detailFile === im.file) { closeImageDetail(); return; }
+    detailFile = im.file;
+    el('image-detail-img').src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(im.file)}?source=${gridSource}`;
+    el('image-detail-name').textContent = im.file;
+    el('image-detail').classList.remove('hidden');
+}
+function closeImageDetail() {
+    detailFile = null;
+    el('image-detail').classList.add('hidden');
+    el('image-detail-img').removeAttribute('src');
+}
+
 function closeImageGrid() {
     el('image-grid-overlay').classList.add('hidden');
     el('image-grid').innerHTML = '';
     el('image-grid-foot').textContent = '';
+    closeImageDetail();
     gridImages = [];
 }
 
@@ -909,11 +972,13 @@ el('settings-save-btn').onclick = saveSettings;
 el('settings-image-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
 el('ov-promote-btn').onclick = () => { if (selectedId) promoteProject(selectedId); };
 el('ov-archive-btn').onclick = archiveProject;
-el('ov-preview-images-btn').onclick = previewImages;
+el('ov-preview-images-btn').onclick = () => previewImages('image');
+el('ov-preview-template-btn').onclick = () => previewImages('template');
 el('image-grid-close').onclick = closeImageGrid;
+el('image-detail-close').onclick = closeImageDetail;
+el('act-open-dist').onclick = () => { if (selectedId) fetch(`/api/open-dist?id=${encodeURIComponent(selectedId)}`); };
 el('act-back').onclick = () => setView('project');
-el('run-btn').onclick = runAction;
-el('clear-btn').onclick = () => { consoleEl.textContent = ''; };
+el('run-btn').onclick = startRun;
 el('close-editor-btn').onclick = closeEditor;
 el('save-btn').onclick = saveFile;
 
@@ -962,7 +1027,8 @@ document.addEventListener('keydown', (e) => {
         saveFile();
     }
     if (e.key === 'Escape') {
-        if (!el('image-grid-overlay').classList.contains('hidden')) closeImageGrid();
+        if (!el('image-detail').classList.contains('hidden')) closeImageDetail();
+        else if (!el('image-grid-overlay').classList.contains('hidden')) closeImageGrid();
         else if (!el('modal-overlay').classList.contains('hidden')) closeModal(true);
     }
 });

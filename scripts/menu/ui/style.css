@@ -532,6 +532,13 @@ button.ghost:hover { background: var(--panel-2); color: var(--text); }
 .details dd { margin: 0; }
 
 .run-row { align-items: center; }
+.act-outputs { display: flex; flex-direction: column; gap: 6px; }
+.act-outputs .pdf-results { margin-top: 6px; border-top: none; padding-top: 0; }
+.ov-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#console:empty::before {
+    content: "Console output will appear here…";
+    color: var(--muted);
+}
 
 .view-head-actions { display: flex; gap: 8px; }
 #ov-preview-images-btn { align-self: flex-start; }
@@ -666,6 +673,7 @@ table.batches th:nth-child(2), table.batches th:nth-child(3) { text-align: right
     border-bottom: 1px solid var(--border);
 }
 .image-grid-head h2 { margin: 0; font-size: 16px; }
+.image-grid-body { flex: 1; min-height: 0; display: flex; }
 .image-grid {
     flex: 1;
     min-height: 0;
@@ -676,6 +684,37 @@ table.batches th:nth-child(2), table.batches th:nth-child(3) { text-align: right
     gap: 18px;
     align-content: start;
 }
+
+/* Right-side full-size detail panel */
+.image-detail {
+    flex: 0 0 auto;
+    width: 50%;
+    max-width: 60%;
+    min-width: 280px;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: #0d0f13;
+}
+.image-detail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+}
+.image-detail-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    overflow: auto;
+}
+/* Show at natural size, but never taller/wider than the panel. */
+.image-detail-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .image-cell {
     margin: 0;
     background: var(--panel);
