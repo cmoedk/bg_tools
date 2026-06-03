@@ -1,11 +1,25 @@
 {
   /**
-    cards.text.json5 files are used to generate simple text cards for initial testing of a game.
-  **/
-  c00: "Card Back",
-  c01: [
-    { text: "Card Title", font: "Georgia", fontSize: 140, color: "#aa1111"},
-    { text: "Card Content", font: "monospace", fontSize: 120, color: "#000000"},
-  ],
-  c02: "Card Title. Card Content"
+   * cards.text.json5 files describe the *content* of template-rendered cards.
+   * They use the same batched shape as .cards.json5: each batch shares a
+   * `template` HTML file (in design/) and lists its cards under `cards`, where
+   * each card supplies the `values` injected into the template's {placeholders}.
+   *
+   * All cards in a batch share one template url; a single card may override it
+   * with its own `template`. (Plain string / array entries are still supported
+   * for simple text-on-canvas cards.)
+   **/
+  magic_cards: {
+    template: 'card.html', // design/card.html — shared by every card in this batch
+    cards: {
+      m01: { values: { title: 'Fireball', cost: 3, text: 'Deal 3 damage.' } },
+      m02: { values: { title: 'Heal', cost: 1, text: 'Restore 2 health.' } },
+    },
+  },
+  magic_backs: {
+    template: 'card_back.html',
+    cards: {
+      b00: { values: { label: 'Magic' } },
+    },
+  },
 }

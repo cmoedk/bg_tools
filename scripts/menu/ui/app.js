@@ -17,8 +17,11 @@ let currentView = 'empty';    // 'empty' | 'project' | 'action' | 'editor' | 'se
 let currentActionIndex = null;
 let files = [];               // file descriptors (editor)
 let currentFilePath = null;
+let currentFileLang = '';     // '' = base project, 'en'/'da'/... = translation variant
 let currentKind = null;       // 'markdown' | 'json5' | 'text' | 'html' | 'css'
 let cardHtmlBase = null;      // { name, content } base HTML for card/CSS preview
+let templateCards = [];       // cards (id + values) that use the previewed template
+let selectedCardId = null;    // which card's values fill the template preview
 let dirty = false;            // unsaved edits in the editor
 let currentStream = null;     // EventSource for a running generator
 let previewTimer = null;
@@ -78,6 +81,7 @@ function renderProjects() {
         const title = document.createElement('span');
         title.className = 'group-title';
         title.textContent = `${group.key.split('_')[0]} · ${group.label}`;
+        if (group.description) title.title = group.description;
         const addBtn = document.createElement('button');
         addBtn.className = 'add-btn ghost';
         addBtn.textContent = '+ Add';
@@ -330,38 +334,88 @@ async function archiveProject() {
 }
 
 // --- Preview Images (full-screen grid) ---
+let gridImages = [];
 async function previewImages() {
     const res = await fetch(`/api/project-images?id=${encodeURIComponent(selectedId)}`);
     const data = await res.json();
-    if (!res.ok || !data.images || !data.images.length) { openAlert('Images', 'No images found for this project.'); return; }
-    el('image-grid-title').textContent = `Images — ${currentProject.name} (${data.images.length})`;
+    if (!res.ok || !data.images || !data.images.length) { openAlert('Images', 'No card images found for this project.'); return; }
+    gridImages = data.images;
+    renderImageGrid();
+    el('image-grid-overlay').classList.remove('hidden');
+}
+
+function renderImageGrid() {
+    el('image-grid-title').textContent = `Images — ${currentProject.name} (${gridImages.length})`;
     const grid = el('image-grid');
     grid.innerHTML = '';
     const idp = idPathFor(selectedId);
-    data.images.forEach((im) => {
+    gridImages.forEach((im) => {
         const cell = document.createElement('figure');
         cell.className = 'image-cell';
         const img = document.createElement('img');
         img.loading = 'lazy';
         img.src = `/api/image/${idp}/${encodeURIComponent(im.file)}`;
         img.alt = im.id;
-        const cap = document.createElement('figcaption');
-        cap.innerHTML =
-            `<span class="img-id">${escapeHtml(im.id)}</span>` +
-            `<span class="img-name">${escapeHtml(im.file)}</span>` +
-            `<span class="img-amount">${im.amount === null ? '—' : '×' + im.amount}</span>`;
         cell.appendChild(img);
+
+        const cap = document.createElement('figcaption');
+        const idEl = document.createElement('span');
+        idEl.className = 'img-id';
+        idEl.textContent = im.id;
+        const nameEl = document.createElement('span');
+        nameEl.className = 'img-name';
+        nameEl.textContent = im.file;
+        cap.appendChild(idEl);
+        cap.appendChild(nameEl);
+
+        if (im.isBack) {
+            const back = document.createElement('span');
+            back.className = 'img-amount';
+            back.textContent = '(back)';
+            cap.appendChild(back);
+        } else {
+            // Editable amount (mod): writes back into .cards.json5
+            const amtRow = document.createElement('label');
+            amtRow.className = 'img-amount-row';
+            amtRow.innerHTML = '<span>×</span>';
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = '0';
+            input.className = 'img-amount-input';
+            input.value = im.amount == null ? 0 : im.amount;
+            input.onchange = () => updateCardAmount(im, input);
+            amtRow.appendChild(input);
+            cap.appendChild(amtRow);
+        }
         cell.appendChild(cap);
         grid.appendChild(cell);
     });
-    const totalAmount = data.images.reduce((s, im) => s + (im.amount || 0), 0);
-    el('image-grid-foot').textContent = `${data.images.length} unique · ${totalAmount} total`;
-    el('image-grid-overlay').classList.remove('hidden');
+    updateGridFoot();
 }
+
+async function updateCardAmount(im, input) {
+    const amount = parseInt(input.value, 10);
+    if (!Number.isInteger(amount) || amount < 0) { input.value = im.amount ?? 0; return; }
+    const res = await fetch('/api/card-amount', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId, cardId: im.id, amount }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { input.value = im.amount ?? 0; openAlert('Amount', data.error || 'Could not update amount.'); return; }
+    im.amount = amount;
+    updateGridFoot();
+}
+
+function updateGridFoot() {
+    const total = gridImages.reduce((s, im) => s + (im.amount || 0), 0);
+    el('image-grid-foot').textContent = `${gridImages.length} unique · ${total} total`;
+}
+
 function closeImageGrid() {
     el('image-grid-overlay').classList.add('hidden');
     el('image-grid').innerHTML = '';
     el('image-grid-foot').textContent = '';
+    gridImages = [];
 }
 
 // --- Native folder picker for Settings ---
@@ -415,7 +469,7 @@ async function openEditor() {
     dirty = false;
     setView('editor');
     const def = files.find(f => f.default) || files[0];
-    if (def) selectFile(def.path);
+    if (def) selectFile(def.path, def.lang || '');
     else startNewFile();
 }
 
@@ -424,13 +478,16 @@ async function closeEditor() {
     setView('project');
 }
 
+function fileValue(f) { return `${f.lang || ''}|${f.path}`; }
+function fileLabel(f) { return f.lang ? `${f.path}  (${f.lang})` : f.path; }
+
 function renderFileSelect() {
     const sel = el('file-select');
     sel.innerHTML = '';
     files.forEach((f) => {
         const opt = document.createElement('option');
-        opt.value = f.path;
-        opt.textContent = f.path;
+        opt.value = fileValue(f);
+        opt.textContent = fileLabel(f);
         sel.appendChild(opt);
     });
     const nw = document.createElement('option');
@@ -444,27 +501,64 @@ function kindFromPath(p) {
     return ({ md: 'markdown', json5: 'json5', txt: 'text', html: 'html', css: 'css' })[ext] || null;
 }
 
-async function selectFile(path) {
-    el('file-select').value = path;
-    const res = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(path)}`);
+async function selectFile(path, lang = '') {
+    el('file-select').value = `${lang || ''}|${path}`;
+    const res = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(path)}&lang=${encodeURIComponent(lang)}`);
     if (!res.ok) { setEditorError('Could not load file.'); return; }
     const data = await res.json();
     setEditorError('');
     currentFilePath = path;
+    currentFileLang = lang;
     el('file-name').value = path;
     el('file-name').readOnly = true;
     code.value = data.content;
     currentKind = kindFromPath(path);
     dirty = false;
     setSaveStatus('');
-    if (currentKind === 'html') cardHtmlBase = { name: path, content: data.content };
-    else if (currentKind === 'css') await resolveCssBase(path);
+    if (currentKind === 'html') {
+        cardHtmlBase = { name: path, content: data.content, path, lang };
+        await loadTemplateCards(path, lang);
+    } else if (currentKind === 'css') {
+        await resolveCssBase(path, lang);
+    }
     renderPreview();
+}
+
+// Load the cards that use this template (for the preview card selector).
+async function loadTemplateCards(templatePath, lang) {
+    templateCards = [];
+    selectedCardId = null;
+    const base = templatePath.split('/').pop();
+    try {
+        const res = await fetch(`/api/template-cards?id=${encodeURIComponent(selectedId)}&template=${encodeURIComponent(base)}&lang=${encodeURIComponent(lang || '')}`);
+        if (res.ok) templateCards = (await res.json()).cards || [];
+    } catch { /* none */ }
+    const sel = el('card-select');
+    sel.innerHTML = '';
+    templateCards.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = c.id;
+        sel.appendChild(o);
+    });
+    selectedCardId = templateCards.length ? templateCards[0].id : null;
+    if (selectedCardId) sel.value = selectedCardId;
+}
+
+// Replace {key} placeholders in a template with the selected card's values.
+function applyCardValues(html) {
+    if (!selectedCardId) return html;
+    const card = templateCards.find(c => c.id === selectedCardId);
+    const values = { id: selectedCardId, ...((card && card.values) || {}) };
+    let out = html;
+    for (const [k, v] of Object.entries(values)) out = out.split(`{${k}}`).join(String(v));
+    return out;
 }
 
 function startNewFile() {
     el('file-select').value = NEW_FILE;
     currentFilePath = null;
+    currentFileLang = '';
     el('file-name').value = '';
     el('file-name').readOnly = false;
     el('file-name').focus();
@@ -487,7 +581,7 @@ async function saveFile() {
     const res = await fetch('/api/file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedId, path: name, content: code.value }),
+        body: JSON.stringify({ id: selectedId, path: name, content: code.value, lang: currentFileLang }),
     });
     const data = await res.json();
     if (!res.ok) { setSaveStatus(''); setEditorError(data.error || 'Save failed.'); return false; }
@@ -495,20 +589,20 @@ async function saveFile() {
     dirty = false;
     currentFilePath = name;
     currentKind = kindFromPath(name);
-    if (currentKind === 'html') cardHtmlBase = { name, content: code.value };
-    await reloadFiles(name);
+    if (currentKind === 'html') cardHtmlBase = { name, content: code.value, path: name, lang: currentFileLang };
+    await reloadFiles(name, currentFileLang);
     renderPreview();
     return true;
 }
 
-async function reloadFiles(selectPath) {
+async function reloadFiles(selectPath, selectLang = '') {
     const res = await fetch(`/api/project-files?id=${encodeURIComponent(selectedId)}`);
     if (!res.ok) return;
     const data = await res.json();
     files = data.files;
     renderFileSelect();
-    if (selectPath && files.some(f => f.path === selectPath)) {
-        el('file-select').value = selectPath;
+    if (selectPath && files.some(f => f.path === selectPath && (f.lang || '') === selectLang)) {
+        el('file-select').value = `${selectLang || ''}|${selectPath}`;
         el('file-name').value = selectPath;
         el('file-name').readOnly = true;
     }
@@ -527,17 +621,19 @@ function htmlImportsCss(html, cssName) {
     while ((m = importRe.exec(html)) !== null) if (refBasename(m[1]) === base) return true;
     return false;
 }
-async function resolveCssBase(cssPath) {
+async function resolveCssBase(cssPath, cssLang = '') {
     cardHtmlBase = null;
     const cssName = cssPath.split('/').pop();
-    const htmls = files.filter(f => f.kind === 'html');
+    const htmls = files.filter(f => f.kind === 'html')
+        .sort((a, b) => ((b.lang || '') === cssLang) - ((a.lang || '') === cssLang)); // same-language templates first
     let firstHtml = null;
     for (const h of htmls) {
-        const r = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(h.path)}`);
+        const r = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(h.path)}&lang=${encodeURIComponent(h.lang || '')}`);
         if (!r.ok) continue;
         const d = await r.json();
-        if (firstHtml === null) firstHtml = { name: h.path, content: d.content };
-        if (htmlImportsCss(d.content, cssName)) { cardHtmlBase = { name: h.path, content: d.content }; return; }
+        const base = { name: fileLabel(h), content: d.content, path: h.path, lang: h.lang || '' };
+        if (firstHtml === null) firstHtml = base;
+        if (htmlImportsCss(d.content, cssName)) { cardHtmlBase = base; return; }
     }
     if (firstHtml) cardHtmlBase = firstHtml; // fall back to the first template
 }
@@ -547,6 +643,7 @@ function hideAllPreviews() {
     el('md-preview').classList.add('hidden');
     el('card-stage').classList.add('hidden');
     el('preview-empty').classList.add('hidden');
+    el('card-preview-bar').classList.add('hidden');
     el('preview-note').textContent = '';
 }
 
@@ -568,7 +665,17 @@ async function renderMarkdownPreview() {
     });
     if (!res.ok) return;
     const data = await res.json();
-    frame.srcdoc = data.html;
+    frame.srcdoc = data.html; // 'load' fires -> syncMdScroll() restores position
+}
+
+// Keep the markdown preview scrolled to the same relative position as the editor.
+let mdScrollRatio = 0;
+function syncMdScroll() {
+    const win = el('md-preview').contentWindow;
+    const doc = win && win.document && win.document.documentElement;
+    if (!doc) return;
+    const max = doc.scrollHeight - win.innerHeight;
+    win.scrollTo(0, max > 0 ? mdScrollRatio * max : 0);
 }
 
 function idPathFor(id) {
@@ -589,9 +696,10 @@ function injectLiveCss(html, css) {
 }
 
 function renderCardPreview(html) {
-    cardHtmlBase = { name: el('file-name').value, content: html };
+    cardHtmlBase = { name: el('file-name').value, content: html, path: currentFilePath, lang: currentFileLang };
+    el('card-preview-bar').classList.toggle('hidden', templateCards.length === 0);
     el('card-stage').classList.remove('hidden');
-    el('card-preview').srcdoc = injectBase(html);
+    el('card-preview').srcdoc = injectBase(applyCardValues(html));
     fitPreview();
 }
 
@@ -794,6 +902,7 @@ function escapeHtml(s) {
 }
 
 // --- Wire up ---
+el('card-select').onchange = () => { selectedCardId = el('card-select').value; renderCardPreview(code.value); };
 el('settings-btn').onclick = async () => { if (await guardUnsaved()) openSettings(); };
 el('settings-browse-btn').onclick = pickFolder;
 el('settings-save-btn').onclick = saveSettings;
@@ -810,11 +919,22 @@ el('save-btn').onclick = saveFile;
 
 el('file-select').addEventListener('change', async () => {
     const v = el('file-select').value;
-    if (!(await guardUnsaved())) { el('file-select').value = currentFilePath || NEW_FILE; return; }
-    if (v === NEW_FILE) startNewFile();
-    else selectFile(v);
+    if (!(await guardUnsaved())) {
+        el('file-select').value = currentFilePath === null ? NEW_FILE : `${currentFileLang || ''}|${currentFilePath}`;
+        return;
+    }
+    if (v === NEW_FILE) { startNewFile(); return; }
+    const i = v.indexOf('|');
+    selectFile(v.slice(i + 1), v.slice(0, i));
 });
 code.addEventListener('input', () => { dirty = true; setSaveStatus(''); schedulePreview(); });
+code.addEventListener('scroll', () => {
+    if (currentKind !== 'markdown') return;
+    const denom = code.scrollHeight - code.clientHeight;
+    mdScrollRatio = denom > 0 ? code.scrollTop / denom : 0;
+    syncMdScroll();
+});
+el('md-preview').addEventListener('load', syncMdScroll);
 code.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
         e.preventDefault();

@@ -60,11 +60,44 @@ export async function getImageTexts(gameFolder) {
         if (!fileData) {
             throw new Error(`${filePath} contains no data.`);
         };
-        
+
         /** @type types.CardData  */
-        return JSON5.parse(fileData);         
+        return normalizeCardTexts(JSON5.parse(fileData));
     }
 
+}
+
+/**
+ * Card-text files may use the batched format (matching .cards.json5), where a
+ * batch shares a `template` url and lists `cards: { id: { values } }`:
+ *
+ *   { magic_backs: { template: 'magic_back.html', cards: { m01: { values: {...} } } } }
+ *
+ * The renderer consumes a flat map of cardId -> text entry, so this flattens the
+ * batched form to `{ m01: { template: { url, values } } }`. The older flat form
+ * (cardId -> string | array | { template: { url, values } }) is returned as-is.
+ * @param {*} data
+ */
+export function normalizeCardTexts(data) {
+    if (!data || typeof data !== 'object') return data;
+    const isBatched = Object.values(data).some(
+        v => v && typeof v === 'object' && !Array.isArray(v) && v.cards && typeof v.cards === 'object');
+    if (!isBatched) return data;
+
+    const flat = {};
+    for (const batch of Object.values(data)) {
+        if (!batch || typeof batch !== 'object' || !batch.cards) continue;
+        const batchTemplate = batch.template;
+        for (const [cardId, card] of Object.entries(batch.cards)) {
+            if (card && typeof card === 'object' && !Array.isArray(card)) {
+                const url = card.template || batchTemplate;
+                flat[cardId] = url ? { template: { url, values: card.values || {} } } : (card.values || card);
+            } else {
+                flat[cardId] = card; // plain string / array -> canvas text fallback
+            }
+        }
+    }
+    return flat;
 }
 
 
@@ -114,8 +147,10 @@ export async function getImageInfos(gameFolder, imagefolderpath, isText = false)
         }
     }
     
-    for (const filePath of filePaths) {        
-        if (!filePath.includes('.json5') || filePath.includes('.errata')) {
+    for (const filePath of filePaths) {
+        // Card structure/quantities come from *.cards.json5 (and component files),
+        // never from the *.cards.text.json5 content file.
+        if (!filePath.includes('.json5') || filePath.includes('.errata') || filePath.includes('.text')) {
             continue;
         }
        

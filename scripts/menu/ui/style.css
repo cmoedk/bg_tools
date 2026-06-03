@@ -128,7 +128,11 @@ button:disabled {
 .row {
     display: flex;
     gap: 10px;
+    align-items: center;
 }
+
+/* The Settings "Saved" indicator: vertically centered, gently rounded. */
+#settings-status { border-radius: 6px; }
 
 input[type="text"] {
     flex: 1;
@@ -590,6 +594,9 @@ table.batches th:nth-child(2), table.batches th:nth-child(3) { text-align: right
 }
 .section-head .preview-base { text-transform: none; letter-spacing: 0; }
 
+.card-preview-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+.card-preview-bar .select { flex: 1; }
+
 .preview-host { flex: 1; min-height: 0; display: flex; position: relative; }
 .preview-host .md-preview-frame { border-radius: 8px; }
 .preview-host .preview-stage { flex: 1; }
@@ -690,6 +697,17 @@ table.batches th:nth-child(2), table.batches th:nth-child(3) { text-align: right
 .image-cell .img-id { font-weight: 700; word-break: break-all; }
 .image-cell .img-name { color: var(--muted); word-break: break-all; }
 .image-cell .img-amount { color: var(--accent); font-weight: 600; }
+.image-cell .img-amount-row { display: flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; }
+.image-cell .img-amount-input {
+    width: 64px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 13px;
+}
+.image-cell .img-amount-input:focus { outline: none; border-color: var(--accent); }
 .image-grid-foot {
     flex: 0 0 auto;
     padding: 12px 24px;

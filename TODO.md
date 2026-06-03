@@ -1,10 +1,18 @@
 # TODOS
 
-## 2 June 2026
+## 3 June 2026
 
-- Saved info (after pressing save in settings) is not centered and too much border radius.
-- In previewing images, you should be able to change the amount (mod). Also should just display images in .cards.json5, not all images in folder.
-- Folder names with .en f.ex. represents translations. They should be part of the project without the suffix, and their files in the Edit Files have "(en)" after the file name.
+- ~~Saved info (after pressing save in settings) is not centered and too much border radius.~~
+- ~~In previewing images, you should be able to change the amount (mod). Also should just display images in .cards.json5, not all images in folder.~~
+- ~~Folder names with .en f.ex. represents translations. They should be part of the project without the suffix, and their files in the Edit Files have "(en)" after the file name.~~
+- ~~If config.ini does not exist, generate it.~~
+- ~~Template files (.cards.text) should have the same format as .cards, with batch names. Batches can then share the same template url (so it becomes { magic_backs: {template: 'magic_back.html', cards: {m01: { values: {...}}}}})~~
+- ~~Scrolling a file still does not scroll the markdown preview.~~
+- ~~When previewing a template, add a select input at the top, where you can preview a specific card, that uses that template. Default to the first card.~~
+- ~~Hover over a category (1_idea, etc.) to tooltip the description of the category.~~
+
+
+## 2 June 2026
 
 - ~~Remove change image path from header~~
 - ~~Rename Board Game Rules to bg_tools in header and title~~

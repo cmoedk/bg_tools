@@ -29,13 +29,13 @@ const DIST_DIR = path.join(PROJECT_ROOT, '_dist'); // generators write their out
 // from one folder to the next (see planPromotion). In 1_idea a project is a single
 // `<name>.idea.md` file; in every later folder it is a `<name>/` subfolder.
 const STATUS_FOLDERS = [
-    { key: '1_idea', label: 'Idea', kind: 'file' },
-    { key: '2_draft', label: 'Draft', kind: 'folder' },
-    { key: '3_test', label: 'Test', kind: 'folder' },
-    { key: '4_playtest', label: 'Playtest', kind: 'folder' },
-    { key: '5_prototype', label: 'Prototype', kind: 'folder' },
-    { key: '6_production', label: 'Production', kind: 'folder' },
-    { key: '7_archive', label: 'Archive', kind: 'folder' },
+    { key: '1_idea', label: 'Idea', kind: 'file', description: 'Games that only exist as concepts or ideas.' },
+    { key: '2_draft', label: 'Draft', kind: 'folder', description: 'Games that have partial or complete draft rules.' },
+    { key: '3_test', label: 'Test', kind: 'folder', description: 'Games that are ready to be tested solo.' },
+    { key: '4_playtest', label: 'Playtest', kind: 'folder', description: 'Games that are ready to be tested with others.' },
+    { key: '5_prototype', label: 'Prototype', kind: 'folder', description: 'Games ready to be tested by others / shown at events or to a publisher.' },
+    { key: '6_production', label: 'Production', kind: 'folder', description: 'Games that are in production.' },
+    { key: '7_archive', label: 'Archive', kind: 'folder', description: 'Discarded games.' },
 ];
 const STATUS_BY_KEY = new Map(STATUS_FOLDERS.map(f => [f.key, f]));
 // Generators only make sense once a game has component files (from 3_test onward).
@@ -159,6 +159,15 @@ async function writeConfigValue(key, value) {
     await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8');
 }
 
+// Create config.ini if it doesn't exist yet (migrating a legacy image_path.txt
+// into it when present), so the project always has a config file to grow.
+async function ensureConfig() {
+    if (existsSync(CONFIG_FILE)) return;
+    const map = await readConfigMap();
+    if (!('paths.images' in map)) map['paths.images'] = '';
+    try { await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8'); } catch { /* read-only fs */ }
+}
+
 // The master image folder, read from config.ini ([paths] images = ...).
 async function readImagePath() {
     const map = await readConfigMap();
@@ -207,6 +216,27 @@ function resolveProject(id) {
     };
 }
 
+// A folder named "<base>.<xx>" (xx = two letters) is a localized variant of the
+// project "<base>" (see structure.md). Variants are folded into the base project;
+// their files appear in the editor tagged with the language code.
+const LANG_RE = /^([A-Za-z0-9][A-Za-z0-9 _\-.]*)\.([a-z]{2})$/;
+
+// Discover the localized variant folders of a (folder-kind) project.
+async function getVariants(project) {
+    if (project.kind !== 'folder') return [];
+    let entries = [];
+    try { entries = await fs.readdir(project.statusDir, { withFileTypes: true }); } catch { return []; }
+    const prefix = `${project.name}.`;
+    const variants = [];
+    for (const e of entries) {
+        if (!e.isDirectory() || !e.name.startsWith(prefix)) continue;
+        const lang = e.name.slice(prefix.length);
+        if (/^[a-z]{2}$/.test(lang)) variants.push({ lang, dir: path.join(project.statusDir, e.name), folderName: e.name });
+    }
+    variants.sort((a, b) => a.lang.localeCompare(b.lang));
+    return variants;
+}
+
 // List all projects, grouped by status folder.
 async function listProjects() {
     const folders = [];
@@ -225,15 +255,18 @@ async function listProjects() {
                 }
             }
         } else {
+            // Fold "<base>.<xx>" translation folders into their base project.
+            const bases = new Set();
             for (const e of entries) {
-                if (e.isDirectory() && NAME_RE.test(e.name)) {
-                    projects.push({ id: `${meta.key}/${e.name}`, name: e.name, status: meta.key });
-                }
+                if (!e.isDirectory() || !NAME_RE.test(e.name)) continue;
+                const m = e.name.match(LANG_RE);
+                bases.add(m ? m[1] : e.name);
             }
+            for (const base of bases) projects.push({ id: `${meta.key}/${base}`, name: base, status: meta.key });
         }
         projects.sort((a, b) => a.name.localeCompare(b.name));
         folders.push({
-            key: meta.key, label: meta.label, kind: meta.kind,
+            key: meta.key, label: meta.label, kind: meta.kind, description: meta.description || '',
             canGenerate: GENERATE_FOLDERS.has(meta.key),
             projects,
         });
@@ -241,42 +274,49 @@ async function listProjects() {
     return { folders };
 }
 
-// List the editable files belonging to a project.
-async function listProjectFiles(project) {
-    const files = [];
-    if (project.kind === 'file') {
-        if (existsSync(project.ideaFile)) {
-            files.push({ path: project.ideaRel, kind: 'markdown', group: 'text', default: true });
-        }
-        return files;
-    }
-    // Text files directly in the project folder
-    let entries = [];
-    try {
-        entries = await fs.readdir(project.folderDir, { withFileTypes: true });
-    } catch { return files; }
+// Collect the editable files in one folder, tagged with a language code ('' = base).
+async function collectFiles(dir, lang, files) {
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
         if (!e.isFile()) continue;
         const ext = path.extname(e.name).toLowerCase();
         if (!EDITABLE_EXT.has(ext) || ext === '.html' || ext === '.css') continue;
-        files.push({ path: e.name, kind: KIND_BY_EXT[ext], group: 'text', default: false });
+        files.push({ path: e.name, kind: KIND_BY_EXT[ext], group: 'text', lang, default: false });
     }
-    // Card templates in design/
     try {
-        const designEntries = await fs.readdir(path.join(project.folderDir, 'design'), { withFileTypes: true });
+        const designEntries = await fs.readdir(path.join(dir, 'design'), { withFileTypes: true });
         for (const e of designEntries) {
             if (!e.isFile()) continue;
             const ext = path.extname(e.name).toLowerCase();
             if (ext === '.html' || ext === '.css') {
-                files.push({ path: `design/${e.name}`, kind: KIND_BY_EXT[ext], group: 'template', default: false });
+                files.push({ path: `design/${e.name}`, kind: KIND_BY_EXT[ext], group: 'template', lang, default: false });
             }
         }
     } catch { /* no design dir */ }
-    // Default file: the rules markdown, else the first markdown, else the first file.
-    const rules = files.find(f => f.group === 'text' && /rules/i.test(f.path) && f.kind === 'markdown');
+}
+
+// List the editable files belonging to a project, including localized variants
+// (their descriptors carry a `lang` code; '' means the base project).
+async function listProjectFiles(project) {
+    const files = [];
+    if (project.kind === 'file') {
+        if (existsSync(project.ideaFile)) {
+            files.push({ path: project.ideaRel, kind: 'markdown', group: 'text', lang: '', default: true });
+        }
+        return files;
+    }
+    await collectFiles(project.folderDir, '', files);
+    for (const v of await getVariants(project)) await collectFiles(v.dir, v.lang, files);
+
+    // Default file: the base rules markdown, else the first markdown, else the first file.
+    const rules = files.find(f => f.lang === '' && f.group === 'text' && /rules/i.test(f.path) && f.kind === 'markdown');
     const def = rules || files.find(f => f.kind === 'markdown') || files[0];
     if (def) def.default = true;
-    files.sort((a, b) => (a.group === b.group ? a.path.localeCompare(b.path) : a.group === 'text' ? -1 : 1));
+    files.sort((a, b) =>
+        a.lang !== b.lang ? a.lang.localeCompare(b.lang)
+            : a.group === b.group ? a.path.localeCompare(b.path)
+                : a.group === 'text' ? -1 : 1);
     return files;
 }
 
@@ -346,7 +386,21 @@ async function imagesSummary(project) {
     }
 }
 
-// Full image list for the Preview Images grid: each { file, id, amount }.
+// Card-back image ids referenced via _back / _backs across all batches.
+function cardBackIds(data) {
+    const backs = new Set();
+    for (const v of Object.values(data || {})) {
+        if (!v || typeof v !== 'object') continue;
+        if (typeof v._back === 'string' && v._back !== 'self') backs.add(v._back);
+        if (v._backs && typeof v._backs === 'object') {
+            for (const b of Object.values(v._backs)) if (typeof b === 'string') backs.add(b);
+        }
+    }
+    return backs;
+}
+
+// Full image list for the Preview Images grid. When a .cards.json5 exists, only
+// images referenced by it (card faces + backs) are returned; otherwise all images.
 async function listProjectImages(project) {
     const img = await readImagePath();
     if (!img.valid) return { configured: false, images: [] };
@@ -355,15 +409,63 @@ async function listProjectImages(project) {
     try { entries = await fs.readdir(dir, { withFileTypes: true }); }
     catch { return { configured: true, hasFolder: false, images: [] }; }
     const c = await readCardsFile(project);
-    const amounts = c && c.data ? cardAmounts(c.data) : {};
+    const hasCards = !!(c && c.data);
+    const amounts = hasCards ? cardAmounts(c.data) : {};
+    const backIds = hasCards ? cardBackIds(c.data) : new Set();
     const images = entries
         .filter(e => e.isFile() && IMAGE_EXT.has(path.extname(e.name).toLowerCase()))
         .map(e => {
             const id = e.name.replace(/\.[^.]+$/, '');
-            return { file: e.name, id, amount: id in amounts ? amounts[id] : null };
+            const isCard = id in amounts;
+            return { file: e.name, id, amount: isCard ? amounts[id] : null, isBack: !isCard && backIds.has(id) };
         })
+        .filter(im => !hasCards || im.amount !== null || im.isBack)
         .sort((a, b) => a.id.localeCompare(b.id));
-    return { configured: true, hasFolder: true, images };
+    return { configured: true, hasFolder: true, cardsFile: c ? c.file : null, images };
+}
+
+// Set a card's quantity in the project's .cards.json5, editing the raw text so
+// comments and formatting are preserved. Updates every batch that defines the id.
+async function setCardAmount(project, cardId, amount) {
+    const c = await readCardsFile(project);
+    if (!c) throw httpError(404, 'This project has no .cards.json5 file.');
+    const filePath = path.join(project.folderDir, c.file);
+    let text = await fs.readFile(filePath, 'utf-8');
+    const esc = cardId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(^|[\\s,{])(["']?${esc}["']?\\s*:\\s*)(\\d+)`, 'gm');
+    let found = false;
+    text = text.replace(re, (m, p1, p2) => { found = true; return `${p1}${p2}${amount}`; });
+    if (!found) throw httpError(404, `Card "${cardId}" was not found in ${c.file}.`);
+    await fs.writeFile(filePath, text, 'utf-8');
+}
+
+// Cards (id + values) that use a given template file, read from the batched
+// *.cards.text.json5. Looks in the language variant folder first, then the base.
+async function templateCardsFor(project, templateBase, lang) {
+    if (project.kind !== 'folder') return [];
+    const dirs = [];
+    if (lang) dirs.push(path.join(project.statusDir, `${project.name}.${lang}`));
+    dirs.push(project.folderDir);
+    const want = templateBase.toLowerCase();
+    for (const dir of dirs) {
+        let entries;
+        try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { continue; }
+        const f = entries.find(e => e.isFile() && /\.text\.json5$/i.test(e.name));
+        if (!f) continue;
+        let data;
+        try { data = JSON5.parse(await fs.readFile(path.join(dir, f.name), 'utf-8')); } catch { return []; }
+        const cards = [];
+        for (const batch of Object.values(data || {})) {
+            if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !batch.cards) continue;
+            const batchTmpl = (batch.template || '').toLowerCase();
+            for (const [id, card] of Object.entries(batch.cards)) {
+                const cardTmpl = (card && typeof card === 'object' && card.template) ? card.template.toLowerCase() : '';
+                if ((cardTmpl || batchTmpl) === want) cards.push({ id, values: (card && card.values) || {} });
+            }
+        }
+        return cards;
+    }
+    return [];
 }
 
 // Build an overview of a project for the middle "Project View".
@@ -391,8 +493,9 @@ async function projectOverview(project) {
     };
 }
 
-// Resolve & validate a file path within a project; returns absolute path or null.
-function resolveProjectFile(project, relPath) {
+// Resolve & validate a file path within a project (optionally a language variant
+// folder, lang = 'en' etc.); returns absolute path or null.
+function resolveProjectFile(project, relPath, lang = '') {
     if (typeof relPath !== 'string' || !relPath || relPath.includes('..')) return null;
     const ext = path.extname(relPath).toLowerCase();
     if (!EDITABLE_EXT.has(ext)) return null;
@@ -401,8 +504,13 @@ function resolveProjectFile(project, relPath) {
         if (relPath !== project.ideaRel) return null;
         return project.ideaFile;
     }
-    const abs = path.join(project.folderDir, relPath);
-    if (abs !== project.folderDir && !abs.startsWith(project.folderDir + path.sep)) return null;
+    let baseDir = project.folderDir;
+    if (lang) {
+        if (!/^[a-z]{2}$/.test(lang)) return null;
+        baseDir = path.join(project.statusDir, `${project.name}.${lang}`);
+    }
+    const abs = path.join(baseDir, relPath);
+    if (abs !== baseDir && !abs.startsWith(baseDir + path.sep)) return null;
     return abs;
 }
 
@@ -548,6 +656,16 @@ async function planPromotion(project, { releaseTitle } = {}) {
         desc: `Move ${from}/${name}/ → ${to}/${newName}/`,
     });
 
+    // Carry localized variant folders along (renamed to the new base name).
+    for (const v of await getVariants(project)) {
+        const vTarget = path.join(PROJECT_ROOT, to, `${newName}.${v.lang}`);
+        if (existsSync(vTarget)) return { from, to, ops, needs, blocked: `${to}/${newName}.${v.lang} already exists.` };
+        ops.push({
+            type: 'move', absFrom: v.dir, absTo: vTarget,
+            desc: `Move ${from}/${v.folderName}/ → ${to}/${newName}.${v.lang}/`,
+        });
+    }
+
     const entries = (await fs.readdir(project.folderDir, { withFileTypes: true })).filter(e => e.isFile()).map(e => e.name);
     const findRules = (re) => entries.find(n => re.test(n));
 
@@ -633,8 +751,14 @@ async function archiveProject(project) {
         await fs.mkdir(dest, { recursive: true });
         await fs.rename(project.ideaFile, path.join(dest, `${project.name}.idea.md`));
     } else {
-        if (!existsSync(project.folderDir)) throw httpError(404, 'Project folder is missing.');
-        await fs.rename(project.folderDir, dest);
+        const variants = await getVariants(project);
+        if (!existsSync(project.folderDir) && !variants.length) throw httpError(404, 'Project folder is missing.');
+        if (existsSync(project.folderDir)) await fs.rename(project.folderDir, dest);
+        for (const v of variants) {
+            const vDest = path.join(archiveDir, v.folderName);
+            if (existsSync(vDest)) throw httpError(409, `7_archive/${v.folderName} already exists.`);
+            await fs.rename(v.dir, vDest);
+        }
     }
     return `7_archive/${project.name}`;
 }
@@ -866,6 +990,26 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, await listProjectImages(project));
         }
 
+        if (pathname === '/api/template-cards' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const template = (url.searchParams.get('template') || '').trim();
+            const lang = url.searchParams.get('lang') || '';
+            return sendJson(res, 200, { cards: await templateCardsFor(project, template, lang) });
+        }
+
+        if (pathname === '/api/card-amount' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const cardId = String(body.cardId || '');
+            const amount = Number(body.amount);
+            if (!/^[A-Za-z0-9_\-.]+$/.test(cardId)) return sendJson(res, 400, { error: 'Invalid card id.' });
+            if (!Number.isInteger(amount) || amount < 0) return sendJson(res, 400, { error: 'Amount must be a non-negative whole number.' });
+            await setCardAmount(project, cardId, amount);
+            return sendJson(res, 200, { ok: true });
+        }
+
         if (pathname === '/api/archive' && req.method === 'POST') {
             const body = JSON.parse(await readBody(req) || '{}');
             const project = resolveProject(body.id);
@@ -908,7 +1052,7 @@ const server = http.createServer(async (req, res) => {
         if (pathname === '/api/file' && req.method === 'GET') {
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
-            const abs = resolveProjectFile(project, url.searchParams.get('path') || '');
+            const abs = resolveProjectFile(project, url.searchParams.get('path') || '', url.searchParams.get('lang') || '');
             if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
             try {
                 const content = await fs.readFile(abs, 'utf-8');
@@ -922,7 +1066,7 @@ const server = http.createServer(async (req, res) => {
             const body = JSON.parse(await readBody(req) || '{}');
             const project = resolveProject(body.id);
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
-            const abs = resolveProjectFile(project, (body.path || '').trim());
+            const abs = resolveProjectFile(project, (body.path || '').trim(), body.lang || '');
             if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
             await fs.mkdir(path.dirname(abs), { recursive: true });
             await fs.writeFile(abs, body.content ?? '', 'utf-8');
@@ -1046,4 +1190,5 @@ function start(port, attemptsLeft = 10) {
     });
 }
 
+await ensureConfig();
 start(PORT);
