@@ -461,6 +461,26 @@ async function setCardAmount(project, cardId, amount) {
 
 // Cards (id + values) that use a given template file, read from the batched
 // *.cards.text.json5. Looks in the language variant folder first, then the base.
+// Flatten a parsed *.cards.text.json5 (batched format) into [{ cardId, template, values }].
+function extractTextCards(data) {
+    const out = [];
+    if (!data || typeof data !== 'object') return out;
+    const templateUrl = (t) => (typeof t === 'string' ? t : (t && t.url) || null);
+    for (const batch of Object.values(data)) {
+        if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !batch.cards) continue;
+        const batchTmpl = templateUrl(batch.template);
+        for (const [cardId, card] of Object.entries(batch.cards)) {
+            const isObj = card && typeof card === 'object' && !Array.isArray(card);
+            out.push({
+                cardId,
+                template: (isObj && templateUrl(card.template)) || batchTmpl || null,
+                values: (isObj && card.values) || {},
+            });
+        }
+    }
+    return out;
+}
+
 async function templateCardsFor(project, templateBase, lang) {
     if (project.kind !== 'folder') return [];
     const dirs = [];
@@ -474,16 +494,9 @@ async function templateCardsFor(project, templateBase, lang) {
         if (!f) continue;
         let data;
         try { data = JSON5.parse(await fs.readFile(path.join(dir, f.name), 'utf-8')); } catch { return []; }
-        const cards = [];
-        for (const batch of Object.values(data || {})) {
-            if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !batch.cards) continue;
-            const batchTmpl = (batch.template || '').toLowerCase();
-            for (const [id, card] of Object.entries(batch.cards)) {
-                const cardTmpl = (card && typeof card === 'object' && card.template) ? card.template.toLowerCase() : '';
-                if ((cardTmpl || batchTmpl) === want) cards.push({ id, values: (card && card.values) || {} });
-            }
-        }
-        return cards;
+        return extractTextCards(data)
+            .filter(c => c.template && c.template.toLowerCase() === want)
+            .map(c => ({ id: c.cardId, values: c.values }));
     }
     return [];
 }
@@ -1102,15 +1115,10 @@ const server = http.createServer(async (req, res) => {
                 for (let i = 0; i < lines.length; i++) if (re.test(lines[i])) return i;
                 return -1;
             };
-            const cards = [];
-            for (const batch of Object.values(data || {})) {
-                if (!batch || typeof batch !== 'object' || Array.isArray(batch) || !batch.cards) continue;
-                for (const [cid, card] of Object.entries(batch.cards)) {
-                    const template = (card && typeof card === 'object' && card.template) ? card.template : batch.template;
-                    const values = (card && typeof card === 'object' && card.values) ? card.values : {};
-                    cards.push({ cardId: cid, template: template || null, values, line: lineOf(cid) });
-                }
-            }
+            // Handles both the batched and the older flat .cards.text formats.
+            const cards = extractTextCards(data)
+                .filter(c => c.template)
+                .map(c => ({ ...c, line: lineOf(c.cardId) }));
             if (!cards.length) return sendJson(res, 200, { cardId: null });
             const above = cards.filter(c => c.line >= 0 && c.line <= line);
             const chosen = above.length ? above.reduce((a, b) => (b.line > a.line ? b : a)) : cards[0];

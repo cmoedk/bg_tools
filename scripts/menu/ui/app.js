@@ -824,11 +824,12 @@ async function renderTextCardPreview() {
             : 'Place the cursor inside a card block to preview it';
         return;
     }
-    const tr = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent('design/' + d.template)}&lang=`);
+    const templatePath = 'design/' + d.template;
+    const tr = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(templatePath)}&lang=`);
     if (seq !== previewSeq) return;
     if (!tr.ok) {
         el('preview-empty').classList.remove('hidden');
-        el('preview-note').textContent = `Template not found: design/${d.template}`;
+        el('preview-note').textContent = `Template not found: ${templatePath}`;
         return;
     }
     const html = (await tr.json()).content;
