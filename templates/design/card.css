@@ -1,0 +1,29 @@
+/* card.css — general card SIZE and LAYOUT, shared by every card template.
+   The generator renders at 750x1125px (standard bridge card @ ~300dpi). */
+.card {
+    width: 750px;
+    height: 1125px;
+    box-sizing: border-box;
+    padding: 56px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow: hidden;
+}
+
+.card .title {
+    font-size: 64px;
+    line-height: 1.1;
+    text-align: center;
+}
+
+.card .body {
+    flex: 1;
+    font-size: 42px;
+    line-height: 1.35;
+}
+
+.card .footer {
+    font-size: 26px;
+    text-align: right;
+}

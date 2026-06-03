@@ -471,6 +471,8 @@ button.ghost:hover { background: var(--panel-2); color: var(--text); }
 .pane-empty {
     flex: 1;
     display: flex;
+    flex-direction: column;
+    gap: 12px;
     align-items: center;
     justify-content: center;
     color: var(--muted);
@@ -478,6 +480,12 @@ button.ghost:hover { background: var(--panel-2); color: var(--text); }
     text-align: center;
     padding: 24px;
 }
+
+/* Project overview: structured info + language switch */
+.ov-lang { font-size: 13px; color: var(--muted); }
+.ov-info { display: flex; flex-direction: column; gap: 6px; }
+.ov-info .ov-oneliner { font-size: 16px; font-weight: 600; margin: 0; color: var(--text); }
+.ov-info .ov-desc { margin: 0; line-height: 1.5; }
 
 /* ---- Left: project groups ---- */
 .project-group { display: flex; flex-direction: column; gap: 6px; }

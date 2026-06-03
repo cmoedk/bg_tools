@@ -2,15 +2,15 @@
 
 ## 4 June 2026
 
-- Create a default design template, that is copied when initiating a project that has a design folder (3_test and above). The design template has a card.html (for the specific card with a <style> section, that distinguishes that type of card), card.css (which have general card size and layout properties), and style.css (that has color, font, and text properties)
-- When editing html files, the design preview drop-down should also have the card name, f.ex. m01: Clairvoyance.
-- When editing css files, add a select box, where you can select a card, that uses a template that imports that css for previewing changes (right now it defaults to the first html file).
-- When editing a .text.json5, and the template html file does not exit, in the preview pane add a button "Add Missing Template". When pressing the button, it creates the missing file, and fills it with the default design template (card.html).
-- When editing a file in 1_idea, + New file should not be an option (idea projects are just one file)
-- In the category headers in the left panel, add how many projects exist in that category (f.ex. 1 Idea (13))
-- After Generate JPGs from templates, in the project overview the Preview Template Images does not appear until after a reload of the page.
-- When upgrading to playtest, add a <title>.info.json5, which contains { title, oneLiner, description, duration, playerCount, ages, language  }, that is displayed under the header in project overview (before the data information). If this file does not exist in a current project (playtest and above), generate it. This file may be created by the user in 2_draft and 3_test, and be displayed as well.
-- In the project overview, if there are more languages, add a select to switch between languages. If there are no .info file, just add "Default" as the main language. Generated templates will look in the <title>.<lang> folder for .text.cards, and in the same folder from the master image path.
+- ~~Create a default design template, that is copied when initiating a project that has a design folder (3_test and above). The design template has a card.html (for the specific card with a <style> section, that distinguishes that type of card), card.css (which have general card size and layout properties), and style.css (that has color, font, and text properties)~~
+- ~~When editing html files, the design preview drop-down should also have the card name, f.ex. m01: Clairvoyance.~~
+- ~~When editing css files, add a select box, where you can select a card, that uses a template that imports that css for previewing changes (right now it defaults to the first html file).~~
+- ~~When editing a .text.json5, and the template html file does not exit, in the preview pane add a button "Add Missing Template". When pressing the button, it creates the missing file, and fills it with the default design template (card.html).~~
+- ~~When editing a file in 1_idea, + New file should not be an option (idea projects are just one file)~~
+- ~~In the category headers in the left panel, add how many projects exist in that category (f.ex. 1 Idea (13))~~
+- ~~After Generate JPGs from templates, in the project overview the Preview Template Images does not appear until after a reload of the page.~~
+- ~~When upgrading to playtest, add a <title>.info.json5, which contains { title, oneLiner, description, duration, playerCount, ages, language  }, that is displayed under the header in project overview (before the data information). If this file does not exist in a current project (playtest and above), generate it. This file may be created by the user in 2_draft and 3_test, and be displayed as well.~~
+- ~~In the project overview, if there are more languages, add a select to switch between languages. If there are no .info file, just add "Default" as the main language. Generated templates will look in the <title>.<lang> folder for .text.cards, and in the same folder from the master image path.~~
 
 ## 3 June 2026
 

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- card.css = size & layout · style.css = colors, fonts & text -->
+    <link rel="stylesheet" href="card.css">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Styles specific to THIS card type. Duplicate card.html per card type
+           (e.g. magic_front.html) and tweak this block. {placeholders} are filled
+           from each card's `values` in the .cards.text.json5 file. */
+        .card { border: 8px solid #6d1f1f; border-radius: 28px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="title">{title}</div>
+        <div class="body">{text}</div>
+        <div class="footer">{id}</div>
+    </div>
+</body>
+</html>

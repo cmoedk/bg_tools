@@ -337,19 +337,23 @@ async function listProjectFiles(project) {
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff']);
 
-// Find and parse the project's *.cards.json5 (if any). Returns {file, data} or null.
-async function readCardsFile(project) {
-    if (project.kind !== 'folder') return null;
+// Parse the *.cards.json5 in a folder. Returns {file, data} or null.
+async function readCardsFileIn(dir) {
     let entries;
-    try { entries = await fs.readdir(project.folderDir, { withFileTypes: true }); } catch { return null; }
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return null; }
     const f = entries.find(e => e.isFile() && /\.cards\.json5$/i.test(e.name));
     if (!f) return null;
     try {
-        const data = JSON5.parse(await fs.readFile(path.join(project.folderDir, f.name), 'utf-8'));
-        return { file: f.name, data };
+        return { file: f.name, data: JSON5.parse(await fs.readFile(path.join(dir, f.name), 'utf-8')) };
     } catch {
         return { file: f.name, data: null, error: true };
     }
+}
+
+// Find and parse the project's *.cards.json5 (base folder). Returns {file, data} or null.
+async function readCardsFile(project) {
+    if (project.kind !== 'folder') return null;
+    return readCardsFileIn(project.folderDir);
 }
 
 // id -> total quantity across all batches (used for an image's "amount").
@@ -366,8 +370,8 @@ function cardAmounts(data) {
 }
 
 // Detailed card overview: per-batch unique/total counts plus grand totals.
-async function readCardsOverview(project) {
-    const c = await readCardsFile(project);
+async function readCardsOverview(dir) {
+    const c = await readCardsFileIn(dir);
     if (!c) return null;
     if (c.error || !c.data) return { file: c.file, error: true };
     const batches = [];
@@ -385,11 +389,11 @@ async function readCardsOverview(project) {
     return { file: c.file, batches, unique, total };
 }
 
-// Summary of images in <imagePath>/<name> (count only).
-async function imagesSummary(project) {
+// Summary of images in <imagePath>/<imageName> (count only).
+async function imagesSummary(imageName) {
     const img = await readImagePath();
     if (!img.valid) return { configured: false };
-    const dir = path.join(img.path, project.name);
+    const dir = path.join(img.path, imageName);
     try {
         const st = await fs.stat(dir);
         if (!st.isDirectory()) return { configured: true, hasFolder: false };
@@ -416,19 +420,21 @@ function cardBackIds(data) {
 
 // Full image list for the Preview Images grid. When a .cards.json5 exists, only
 // images referenced by it (card faces + backs) are returned; otherwise all images.
-async function listProjectImages(project, source = 'image') {
+async function listProjectImages(project, source = 'image', lang = '') {
+    const assetName = lang ? `${project.name}.${lang}` : project.name;
+    const cardsDir = lang ? path.join(project.statusDir, `${project.name}.${lang}`) : project.folderDir;
     let dir;
     if (source === 'template') {
-        dir = path.join(DIST_DIR, project.name, 'template_jpg');
+        dir = path.join(DIST_DIR, assetName, 'template_jpg');
     } else {
         const img = await readImagePath();
         if (!img.valid) return { configured: false, images: [] };
-        dir = path.join(img.path, project.name);
+        dir = path.join(img.path, assetName);
     }
     let entries;
     try { entries = await fs.readdir(dir, { withFileTypes: true }); }
     catch { return { configured: true, hasFolder: false, images: [] }; }
-    const c = await readCardsFile(project);
+    const c = await readCardsFileIn(cardsDir);
     const hasCards = !!(c && c.data);
     const amounts = hasCards ? cardAmounts(c.data) : {};
     const backIds = hasCards ? cardBackIds(c.data) : new Set();
@@ -496,7 +502,7 @@ async function templateCardsFor(project, templateBase, lang) {
         try { data = JSON5.parse(await fs.readFile(path.join(dir, f.name), 'utf-8')); } catch { return []; }
         return extractTextCards(data)
             .filter(c => c.template && c.template.toLowerCase() === want)
-            .map(c => ({ id: c.cardId, values: c.values }));
+            .map(c => ({ id: c.cardId, name: (c.values && (c.values.title || c.values.name)) || '', values: c.values }));
     }
     return [];
 }
@@ -504,24 +510,46 @@ async function templateCardsFor(project, templateBase, lang) {
 // Build an overview of a project for the middle "Project View".
 // Cards/images are only relevant once a game has components, so they are omitted
 // for 1_idea and 2_draft (showAssets = false).
-async function projectOverview(project) {
+async function projectOverview(project, lang = '') {
+    // Which folder/image-subfolder to read assets from (a language variant or the base).
+    const variants = project.kind === 'folder' ? await getVariants(project) : [];
+    const useVariant = lang && variants.find(v => v.lang === lang);
+    const dir = useVariant ? useVariant.dir : project.folderDir;
+    const assetName = useVariant ? `${project.name}.${lang}` : project.name;
+
     let createdMs = null;
     try {
-        const target = project.kind === 'file' ? project.ideaFile : project.folderDir;
+        const target = project.kind === 'file' ? project.ideaFile : dir;
         const st = await fs.stat(target);
         createdMs = st.birthtimeMs || st.ctimeMs || st.mtimeMs || null;
     } catch { /* missing */ }
+
+    // Structured info, shown under the header; auto-generated from playtest onward.
+    let info = null;
+    if (project.kind === 'folder') {
+        info = await readInfoJson5(dir);
+        if (!info && INFO_STATUSES.has(project.status) && existsSync(dir)) {
+            try {
+                await fs.writeFile(path.join(dir, `${project.name}.info.json5`), infoJson5Seed(project.name), 'utf-8');
+                info = await readInfoJson5(dir);
+            } catch { /* read-only */ }
+        }
+    }
+
+    // Available languages: the base ("Default") plus any .xx variant folders.
+    const languages = [{ code: '', label: (info && info.language) || 'Default' }]
+        .concat(variants.map(v => ({ code: v.lang, label: v.lang })));
 
     const showAssets = !(project.status === '1_idea' || project.status === '2_draft');
     let cards = null;
     let images = { configured: false };
     let templateImages = { exists: false, count: 0 };
     if (showAssets) {
-        cards = await readCardsOverview(project);
-        images = await imagesSummary(project);
-        // JPGs previously rendered from templates (Generate JPGs -> _dist/<project>/template_jpg).
+        cards = await readCardsOverview(dir);
+        images = await imagesSummary(assetName);
+        // JPGs previously rendered from templates (Generate JPGs -> _dist/<name>/template_jpg).
         try {
-            const tdir = path.join(DIST_DIR, project.name, 'template_jpg');
+            const tdir = path.join(DIST_DIR, assetName, 'template_jpg');
             const count = (await fs.readdir(tdir)).filter(n => IMAGE_EXT.has(path.extname(n).toLowerCase())).length;
             if (count) templateImages = { exists: true, count };
         } catch { /* none */ }
@@ -530,6 +558,7 @@ async function projectOverview(project) {
     return {
         id: project.id, name: project.name, status: project.status,
         canGenerate: project.canGenerate, showAssets, createdMs, cards, images, templateImages,
+        info, languages, lang: useVariant ? lang : '',
     };
 }
 
@@ -585,6 +614,48 @@ async function changelogSeed(title) {
     }
 }
 
+// ---- Default design template (copied into a project's design/ folder) ----
+const DESIGN_TEMPLATE_DIR = path.join(TEMPLATES_DIR, 'design');
+const DESIGN_FILES = ['card.html', 'card.css', 'style.css'];
+const DESIGN_STATUSES = new Set(['3_test', '4_playtest', '5_prototype', '6_production']);
+const INFO_STATUSES = new Set(['4_playtest', '5_prototype', '6_production']);
+
+async function readDefaultCardHtml() {
+    try { return await fs.readFile(path.join(DESIGN_TEMPLATE_DIR, 'card.html'), 'utf-8'); }
+    catch { return '<!DOCTYPE html>\n<html><head><meta charset="UTF-8"></head>\n<body><div class="card">{title}</div></body></html>\n'; }
+}
+
+// Copy the default card.html/card.css/style.css into a design/ folder.
+async function copyDesignTemplate(designDir, { onlyMissing = false } = {}) {
+    await fs.mkdir(designDir, { recursive: true });
+    for (const name of DESIGN_FILES) {
+        const dest = path.join(designDir, name);
+        if (onlyMissing && existsSync(dest)) continue;
+        try { await fs.copyFile(path.join(DESIGN_TEMPLATE_DIR, name), dest); } catch { /* template missing */ }
+    }
+}
+
+// Structured project info, shown under the overview header (and editable as json5).
+function infoJson5Seed(title) {
+    return `{\n` +
+        `  title: ${JSON.stringify(title)},\n` +
+        `  oneLiner: "",\n` +
+        `  description: "",\n` +
+        `  duration: "",\n` +
+        `  playerCount: "",\n` +
+        `  ages: "",\n` +
+        `  language: "Default",\n` +
+        `}\n`;
+}
+
+async function readInfoJson5(dir) {
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return null; }
+    const f = entries.find(e => e.isFile() && /\.info\.json5$/i.test(e.name));
+    if (!f) return null;
+    try { return JSON5.parse(await fs.readFile(path.join(dir, f.name), 'utf-8')); } catch { return null; }
+}
+
 // Create the starting files for a new project at the given status.
 async function scaffoldProject(status, title) {
     const meta = STATUS_BY_KEY.get(status);
@@ -638,6 +709,10 @@ async function scaffoldProject(status, title) {
             // Discarded games: just the (named) folder.
             break;
     }
+    // Component design template once a game can render from templates (3_test+).
+    if (DESIGN_STATUSES.has(status)) await copyDesignTemplate(path.join(dir, 'design'));
+    // Structured info file from playtest onward.
+    if (INFO_STATUSES.has(status)) await write(`${title}.info.json5`, infoJson5Seed(title));
     return `${status}/${title}`;
 }
 
@@ -729,6 +804,12 @@ async function planPromotion(project, { releaseTitle } = {}) {
             ops.push({
                 type: 'rename', absFrom: path.join(targetDir, rules), absTo: path.join(targetDir, `${name}_rules_0.1.playtest.md`),
                 desc: `Rename ${rules} → ${name}_rules_0.1.playtest.md`,
+            });
+        }
+        if (!entries.some(n => /\.info\.json5$/i.test(n))) {
+            ops.push({
+                type: 'create', abs: path.join(targetDir, `${name}.info.json5`), content: infoJson5Seed(name),
+                desc: `Create ${name}.info.json5`,
             });
         }
     } else if (from === '4_playtest') {
@@ -901,7 +982,11 @@ function serveStatic(res, urlPath) {
 }
 
 // ---------- Script runner (Server-Sent Events) ----------
-async function runScriptSSE(res, { optionIndex, project, useJpgs }) {
+async function runScriptSSE(res, { optionIndex, project, useJpgs, lang }) {
+    // Generate against a language variant folder (and its master images) when a
+    // language is selected; otherwise the base project.
+    const relPath = lang ? path.join(project.status, `${project.name}.${lang}`) : project.relPath;
+    const gameName = lang ? `${project.name}.${lang}` : project.name;
     res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache',
@@ -924,7 +1009,7 @@ async function runScriptSSE(res, { optionIndex, project, useJpgs }) {
     // re-rendering from the HTML templates.
     const script = useJpgs && option.imageScript ? option.imageScript : option.script;
     const extraArgs = useJpgs && option.imageScript
-        ? [path.resolve(DIST_DIR, project.name, 'template_jpg')]
+        ? [path.resolve(DIST_DIR, gameName, 'template_jpg')]
         : [];
     if (!existsSync(script)) {
         sse('output', { text: `ERROR: Script not found:\n${script}\n` });
@@ -932,11 +1017,11 @@ async function runScriptSSE(res, { optionIndex, project, useJpgs }) {
         return res.end();
     }
 
-    sse('start', { label: option.label, folder: project.name });
+    sse('start', { label: option.label, folder: gameName });
 
     const pdfsBefore = await scanPdfs();
 
-    const child = spawn('node', [script, IMAGE_PATH, project.relPath, project.name, ...extraArgs], {
+    const child = spawn('node', [script, IMAGE_PATH, relPath, gameName, ...extraArgs], {
         cwd: PROJECT_ROOT,
         env: process.env,
     });
@@ -997,13 +1082,15 @@ const server = http.createServer(async (req, res) => {
             if (process.platform !== 'win32') return sendJson(res, 400, { error: 'Opening folders is only available on Windows.' });
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const lang = url.searchParams.get('lang') || '';
+            const assetName = lang ? `${project.name}.${lang}` : project.name;
             let dir;
             if (url.searchParams.get('source') === 'template') {
-                dir = path.join(DIST_DIR, project.name, 'template_jpg');
+                dir = path.join(DIST_DIR, assetName, 'template_jpg');
             } else {
                 const img = await readImagePath();
                 if (!img.valid) return sendJson(res, 400, { error: 'Master image folder is not set.' });
-                dir = path.join(img.path, project.name);
+                dir = path.join(img.path, assetName);
             }
             try { await fs.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
             spawn('explorer', [path.resolve(dir)], { detached: true }).unref();
@@ -1051,7 +1138,7 @@ const server = http.createServer(async (req, res) => {
         if (pathname === '/api/project-overview' && req.method === 'GET') {
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
-            return sendJson(res, 200, await projectOverview(project));
+            return sendJson(res, 200, await projectOverview(project, url.searchParams.get('lang') || ''));
         }
 
         if (pathname === '/api/project-files' && req.method === 'GET') {
@@ -1064,7 +1151,7 @@ const server = http.createServer(async (req, res) => {
         if (pathname === '/api/project-images' && req.method === 'GET') {
             const project = resolveProject(url.searchParams.get('id'));
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
-            return sendJson(res, 200, await listProjectImages(project, url.searchParams.get('source') || 'image'));
+            return sendJson(res, 200, await listProjectImages(project, url.searchParams.get('source') || 'image', url.searchParams.get('lang') || ''));
         }
 
         if (pathname === '/api/has-template-jpgs' && req.method === 'GET') {
@@ -1084,13 +1171,15 @@ const server = http.createServer(async (req, res) => {
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
             const cardId = url.searchParams.get('cardId') || '';
             if (!/^[A-Za-z0-9_\-.]+$/.test(cardId)) return sendJson(res, 200, { file: null });
+            const lang = url.searchParams.get('lang') || '';
+            const assetName = lang ? `${project.name}.${lang}` : project.name;
             let dir;
             if (url.searchParams.get('source') === 'template') {
-                dir = path.join(DIST_DIR, project.name, 'template_jpg');
+                dir = path.join(DIST_DIR, assetName, 'template_jpg');
             } else {
                 const img = await readImagePath();
                 if (!img.valid) return sendJson(res, 200, { file: null });
-                dir = path.join(img.path, project.name);
+                dir = path.join(img.path, assetName);
             }
             let file = null;
             try {
@@ -1151,6 +1240,27 @@ const server = http.createServer(async (req, res) => {
             if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
             const id = await archiveProject(project);
             return sendJson(res, 200, { ok: true, id });
+        }
+
+        // Create a missing design template file, filled with the default card.html
+        // (and ensure card.css / style.css exist alongside it).
+        if (pathname === '/api/add-template' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project || project.kind !== 'folder') return sendJson(res, 400, { error: 'Invalid project.' });
+            const name = (body.name || '').trim();
+            if (!/^[\w.\- ]+\.html$/i.test(name) || name.includes('..')) {
+                return sendJson(res, 400, { error: 'Template must be a simple .html filename.' });
+            }
+            const designDir = path.join(project.folderDir, 'design');
+            await fs.mkdir(designDir, { recursive: true });
+            for (const css of ['card.css', 'style.css']) {
+                const d = path.join(designDir, css);
+                if (!existsSync(d)) { try { await fs.copyFile(path.join(DESIGN_TEMPLATE_DIR, css), d); } catch { /* ignore */ } }
+            }
+            const dest = path.join(designDir, name);
+            if (!existsSync(dest)) await fs.writeFile(dest, await readDefaultCardHtml(), 'utf-8');
+            return sendJson(res, 200, { ok: true, name });
         }
 
         if (pathname === '/api/add-project' && req.method === 'POST') {
@@ -1247,13 +1357,15 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(404).end('Not found');
                 return;
             }
+            const lang = url.searchParams.get('lang') || '';
+            const assetName = lang ? `${project.name}.${lang}` : project.name;
             let imgDir;
             if (url.searchParams.get('source') === 'template') {
-                imgDir = path.join(DIST_DIR, project.name, 'template_jpg');
+                imgDir = path.join(DIST_DIR, assetName, 'template_jpg');
             } else {
                 const img = await readImagePath();
                 if (!img.valid) { res.writeHead(404).end('Not found'); return; }
-                imgDir = path.join(img.path, project.name);
+                imgDir = path.join(img.path, assetName);
             }
             const filePath = path.join(imgDir, fileName);
             if (!filePath.startsWith(imgDir) || !existsSync(filePath) || !(await fs.stat(filePath)).isFile()) {
@@ -1287,7 +1399,7 @@ const server = http.createServer(async (req, res) => {
                 }
                 IMAGE_PATH = image.path;
             }
-            return runScriptSSE(res, { optionIndex, project, useJpgs });
+            return runScriptSSE(res, { optionIndex, project, useJpgs, lang: url.searchParams.get('lang') || '' });
         }
 
         // --- Serve generated PDFs from _dist ---

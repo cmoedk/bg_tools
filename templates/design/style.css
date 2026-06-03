@@ -1,0 +1,21 @@
+/* style.css — COLOR, FONT and TEXT properties, shared by every card template. */
+.card {
+    font-family: "Georgia", "Times New Roman", serif;
+    color: #211c14;
+    background: #f3ecdc;
+}
+
+.card .title {
+    font-weight: 700;
+    color: #6d1f1f;
+}
+
+.card .body {
+    font-weight: 400;
+}
+
+.card .footer {
+    color: #8a7f6a;
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+}

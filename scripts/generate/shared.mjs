@@ -38,26 +38,28 @@ export function parseGeneratorArgs() {
  * @returns {Promise<types.CardData>}
  */
 export async function getImageTexts(gameFolder) {
-    let filePaths = [];
-
-    if (gameFolder.includes('.')) {
-        // Translations have a .xx extension (f.ex .en). We want the json5 file from the main folder
-        gameFolder = gameFolder.split('.')[0];
+    // Localized variants live in "<title>.<xx>" folders. Prefer the variant's own
+    // .cards.text.json5 if it has one; otherwise fall back to the main folder.
+    let dir = gameFolder;
+    if (/\.[a-z]{2}$/.test(gameFolder)) {
+        const ownFiles = await fs.readdir(gameFolder).catch(() => []);
+        const hasOwnText = ownFiles.some(f => f.includes('.json5') && f.includes('.text'));
+        if (!hasOwnText) dir = gameFolder.replace(/\.[a-z]{2}$/, '');
     }
 
+    let filePaths = [];
     try {
-        filePaths = await fs.readdir(gameFolder);
-    } catch (err) {        
+        filePaths = await fs.readdir(dir);
+    } catch (err) {
         console.log(err);
     }
 
-    for (const filePath of filePaths) {        
+    for (const filePath of filePaths) {
         if (!filePath.includes('.json5') || !filePath.includes('.text')) {
             continue;
         }
 
-        const buffer = await fs.readFile(path.join(gameFolder, filePath));
-        const fileData = buffer.toString();
+        const fileData = (await fs.readFile(path.join(dir, filePath))).toString();
 
         if (!fileData) {
             throw new Error(`${filePath} contains no data.`);

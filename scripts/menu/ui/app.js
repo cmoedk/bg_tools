@@ -13,6 +13,7 @@ let config = null;            // { imagePath, imagePathValid, actions, statusFol
 let projects = { folders: [] };
 let selectedId = null;        // "<status>/<name>"
 let currentProject = null;    // { id, name, status, canGenerate }
+let currentLang = '';         // overview language ('' = Default/base, 'en' = the .en variant)
 let currentView = 'empty';    // 'empty' | 'project' | 'action' | 'editor' | 'settings'
 let currentActionIndex = null;
 let files = [];               // file descriptors (editor)
@@ -84,7 +85,7 @@ function renderProjects() {
         head.className = 'group-head';
         const title = document.createElement('span');
         title.className = 'group-title';
-        title.textContent = `${group.key.split('_')[0]} · ${group.label}`;
+        title.textContent = `${group.key.split('_')[0]} · ${group.label} (${group.projects.length})`;
         if (group.description) title.title = group.description;
         const addBtn = document.createElement('button');
         addBtn.className = 'add-btn ghost';
@@ -120,15 +121,66 @@ function renderProjects() {
 async function selectProject(id) {
     if (!(await guardUnsaved())) return;
     selectedId = id;
+    currentLang = '';
     cardHtmlBase = null;
     renderProjects();
-    const res = await fetch(`/api/project-overview?id=${encodeURIComponent(id)}`);
-    if (!res.ok) { setView('empty'); return; }
-    const ov = await res.json();
+    const ov = await fetchOverview();
+    if (!ov) { setView('empty'); return; }
     currentProject = { id: ov.id, name: ov.name, status: ov.status, canGenerate: ov.canGenerate };
     renderOverview(ov);
     renderActions();
     setView('project');
+}
+
+async function fetchOverview() {
+    const res = await fetch(`/api/project-overview?id=${encodeURIComponent(selectedId)}&lang=${encodeURIComponent(currentLang)}`);
+    return res.ok ? res.json() : null;
+}
+
+// Re-fetch + re-render the overview (after a language switch or a generate run).
+async function refreshOverview() {
+    const ov = await fetchOverview();
+    if (ov) renderOverview(ov);
+}
+
+function renderLanguageSelect(ov) {
+    const host = el('ov-lang');
+    host.innerHTML = '';
+    if (!ov.languages || ov.languages.length <= 1) { host.classList.add('hidden'); return; }
+    host.classList.remove('hidden');
+    const label = document.createElement('label');
+    label.textContent = 'Language: ';
+    const sel = document.createElement('select');
+    sel.className = 'select';
+    ov.languages.forEach((l) => {
+        const o = document.createElement('option');
+        o.value = l.code; o.textContent = l.label;
+        sel.appendChild(o);
+    });
+    sel.value = currentLang;
+    sel.onchange = () => { currentLang = sel.value; refreshOverview(); };
+    label.appendChild(sel);
+    host.appendChild(label);
+}
+
+function renderInfo(info) {
+    const host = el('ov-info');
+    host.innerHTML = '';
+    if (!info) return;
+    if (info.oneLiner) { const p = document.createElement('p'); p.className = 'ov-oneliner'; p.textContent = info.oneLiner; host.appendChild(p); }
+    if (info.description) { const p = document.createElement('p'); p.className = 'ov-desc'; p.textContent = info.description; host.appendChild(p); }
+    const meta = [['Players', info.playerCount], ['Ages', info.ages], ['Duration', info.duration], ['Language', info.language]]
+        .filter(([, v]) => v);
+    if (meta.length) {
+        const dl = document.createElement('dl');
+        dl.className = 'details';
+        meta.forEach(([k, v]) => {
+            const dt = document.createElement('dt'); dt.textContent = k;
+            const dd = document.createElement('dd'); dd.textContent = v;
+            dl.appendChild(dt); dl.appendChild(dd);
+        });
+        host.appendChild(dl);
+    }
 }
 
 function renderOverview(ov) {
@@ -136,6 +188,8 @@ function renderOverview(ov) {
     el('ov-name').textContent = ov.name;
     el('ov-promote-btn').classList.toggle('hidden', ov.status === '7_archive');
     el('ov-archive-btn').classList.toggle('hidden', ov.status === '7_archive');
+    renderLanguageSelect(ov);
+    renderInfo(ov.info);
 
     const dl = el('ov-details');
     dl.innerHTML = '';
@@ -305,7 +359,7 @@ function runAction(source) {
     // Show progress immediately, rather than waiting for the first server event.
     appendConsole(`▶ Running: ${action.label}  [${currentProject.name}]${source === 'jpgs' ? '  (from existing JPGs)' : ''}\n\n`);
 
-    const url = `/api/run?option=${currentActionIndex}&id=${encodeURIComponent(selectedId)}${source ? `&source=${source}` : ''}`;
+    const url = `/api/run?option=${currentActionIndex}&id=${encodeURIComponent(selectedId)}${source ? `&source=${source}` : ''}${currentLang ? `&lang=${encodeURIComponent(currentLang)}` : ''}`;
     const es = new EventSource(url);
     currentStream = es;
 
@@ -376,7 +430,7 @@ let gridImages = [];
 let gridSource = 'image';
 async function previewImages(source = 'image') {
     gridSource = source;
-    const res = await fetch(`/api/project-images?id=${encodeURIComponent(selectedId)}&source=${source}`);
+    const res = await fetch(`/api/project-images?id=${encodeURIComponent(selectedId)}&source=${source}&lang=${encodeURIComponent(currentLang)}`);
     const data = await res.json();
     if (!res.ok || !data.images || !data.images.length) { openAlert('Images', 'No images found for this project.'); return; }
     gridImages = data.images;
@@ -391,7 +445,7 @@ function renderImageGrid() {
     const link = document.createElement('a');
     link.className = 'edit-link';
     link.textContent = '📂 Open folder';
-    link.onclick = () => fetch(`/api/open-images?id=${encodeURIComponent(selectedId)}&source=${gridSource}`);
+    link.onclick = () => fetch(`/api/open-images?id=${encodeURIComponent(selectedId)}&source=${gridSource}&lang=${encodeURIComponent(currentLang)}`);
     title.appendChild(link);
 
     const grid = el('image-grid');
@@ -403,7 +457,7 @@ function renderImageGrid() {
         cell.className = 'image-cell';
         const img = document.createElement('img');
         img.loading = 'lazy';
-        img.src = `/api/image/${idp}/${encodeURIComponent(im.file)}?source=${gridSource}`;
+        img.src = `/api/image/${idp}/${encodeURIComponent(im.file)}?source=${gridSource}&lang=${encodeURIComponent(currentLang)}`;
         img.alt = im.id;
         img.title = 'Click to view full size';
         img.style.cursor = 'zoom-in';
@@ -481,7 +535,7 @@ function showImageDetail(index) {
     detailIndex = index;
     const im = gridImages[index];
     detailFile = im.file;
-    el('image-detail-img').src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(im.file)}?source=${gridSource}`;
+    el('image-detail-img').src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(im.file)}?source=${gridSource}&lang=${encodeURIComponent(currentLang)}`;
     el('image-detail-name').textContent = im.file;
     el('image-detail').classList.remove('hidden');
     gridCells.forEach((c, i) => c.classList.toggle('selected', i === index));
@@ -591,10 +645,13 @@ function renderFileSelect() {
         opt.textContent = fileLabel(f);
         sel.appendChild(opt);
     });
-    const nw = document.createElement('option');
-    nw.value = NEW_FILE;
-    nw.textContent = '＋ New file…';
-    sel.appendChild(nw);
+    // Idea projects are a single file — no "New file" option.
+    if (!currentProject || currentProject.status !== '1_idea') {
+        const nw = document.createElement('option');
+        nw.value = NEW_FILE;
+        nw.textContent = '＋ New file…';
+        sel.appendChild(nw);
+    }
 }
 
 function kindFromPath(p) {
@@ -633,7 +690,7 @@ async function selectFile(path, lang = '') {
         cardHtmlBase = { name: path, content: data.content, path, lang };
         await loadTemplateCards(path, lang);
     } else if (currentKind === 'css') {
-        await resolveCssBase(path, lang);
+        await loadCssCards(path, lang);
     }
     renderPreview();
 }
@@ -652,7 +709,7 @@ async function loadTemplateCards(templatePath, lang) {
     templateCards.forEach((c) => {
         const o = document.createElement('option');
         o.value = c.id;
-        o.textContent = c.id;
+        o.textContent = c.name ? `${c.id}: ${c.name}` : c.id;
         sel.appendChild(o);
     });
     selectedCardId = templateCards.length ? templateCards[0].id : null;
@@ -734,21 +791,51 @@ function htmlImportsCss(html, cssName) {
     while ((m = importRe.exec(html)) !== null) if (refBasename(m[1]) === base) return true;
     return false;
 }
-async function resolveCssBase(cssPath, cssLang = '') {
-    cardHtmlBase = null;
+// Build the card list to preview while editing a CSS file: cards from the
+// templates that import this CSS (falling back to the first template), with each
+// card carrying the template's HTML so the preview can apply the live CSS.
+async function loadCssCards(cssPath, cssLang = '') {
+    templateCards = [];
+    selectedCardId = null;
     const cssName = cssPath.split('/').pop();
     const htmls = files.filter(f => f.kind === 'html')
-        .sort((a, b) => ((b.lang || '') === cssLang) - ((a.lang || '') === cssLang)); // same-language templates first
-    let firstHtml = null;
-    for (const h of htmls) {
+        .sort((a, b) => ((b.lang || '') === cssLang) - ((a.lang || '') === cssLang)); // same-language first
+
+    const fetchHtml = async (h) => {
         const r = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(h.path)}&lang=${encodeURIComponent(h.lang || '')}`);
-        if (!r.ok) continue;
-        const d = await r.json();
-        const base = { name: fileLabel(h), content: d.content, path: h.path, lang: h.lang || '' };
-        if (firstHtml === null) firstHtml = base;
-        if (htmlImportsCss(d.content, cssName)) { cardHtmlBase = base; return; }
+        return r.ok ? (await r.json()).content : null;
+    };
+
+    let importing = [];
+    for (const h of htmls) {
+        const html = await fetchHtml(h);
+        if (html != null && htmlImportsCss(html, cssName)) importing.push({ h, html });
     }
-    if (firstHtml) cardHtmlBase = firstHtml; // fall back to the first template
+    if (!importing.length && htmls.length) { // fall back to the first template
+        const html = await fetchHtml(htmls[0]);
+        if (html != null) importing = [{ h: htmls[0], html }];
+    }
+
+    for (const { h, html } of importing) {
+        const tr = await fetch(`/api/template-cards?id=${encodeURIComponent(selectedId)}&template=${encodeURIComponent(h.path.split('/').pop())}&lang=${encodeURIComponent(h.lang || '')}`);
+        const cards = tr.ok ? (await tr.json()).cards : [];
+        if (cards.length) {
+            for (const c of cards) templateCards.push({ id: c.id, name: c.name, values: c.values, htmlContent: html });
+        } else {
+            templateCards.push({ id: h.path.split('/').pop(), name: '', values: {}, htmlContent: html });
+        }
+    }
+
+    selectedCardId = templateCards.length ? templateCards[0].id : null;
+    const sel = el('card-select');
+    sel.innerHTML = '';
+    templateCards.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = c.name ? `${c.id}: ${c.name}` : c.id;
+        sel.appendChild(o);
+    });
+    if (selectedCardId) sel.value = selectedCardId;
 }
 
 // --- Preview ---
@@ -761,6 +848,32 @@ function hideAllPreviews() {
     el('preview-note').textContent = '';
 }
 
+// Show a centered message in the preview pane, optionally with an action button.
+function showPreviewMessage(text, action) {
+    const host = el('preview-empty');
+    host.innerHTML = '';
+    const p = document.createElement('p');
+    p.textContent = text;
+    host.appendChild(p);
+    if (action) {
+        const b = document.createElement('button');
+        b.textContent = action.label;
+        b.onclick = action.onClick;
+        host.appendChild(b);
+    }
+    host.classList.remove('hidden');
+}
+
+async function addMissingTemplate(name) {
+    const res = await fetch('/api/add-template', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId, name }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { openAlert('Add template', d.error || 'Could not create template.'); return; }
+    renderPreview();
+}
+
 function renderPreview() {
     hideAllPreviews();
     if (currentKind === 'markdown') renderMarkdownPreview();
@@ -768,7 +881,7 @@ function renderPreview() {
     else if (currentKind === 'css') renderCssPreview();
     else if (currentKind === 'json5' && currentJson5Mode === 'cards') renderLineImagePreview();
     else if (currentKind === 'json5' && currentJson5Mode === 'text') renderTextCardPreview();
-    else el('preview-empty').classList.remove('hidden');
+    else showPreviewMessage('No preview for this file type.');
 }
 
 // Replace {key} placeholders in template HTML with a card's values.
@@ -787,24 +900,21 @@ async function renderLineImagePreview() {
     if (keyM && !keyM[1].startsWith('_')) candidates.push(keyM[1]);
     for (const m of line.matchAll(/"([^"]+)"/g)) candidates.push(m[1]);
 
+    const langQ = `&lang=${encodeURIComponent(currentFileLang)}`;
     let resolved = null;
     for (const c of candidates) {
-        const r = await fetch(`/api/resolve-card-image?id=${encodeURIComponent(selectedId)}&cardId=${encodeURIComponent(c)}&source=image`);
+        const r = await fetch(`/api/resolve-card-image?id=${encodeURIComponent(selectedId)}&cardId=${encodeURIComponent(c)}&source=image${langQ}`);
         if (seq !== previewSeq) return; // cursor moved on — abandon
         if (r.ok) { const d = await r.json(); if (d.file) { resolved = { cardId: c, file: d.file }; break; } }
     }
     if (seq !== previewSeq) return;
-    const stage = el('line-image-stage');
-    const img = el('line-image');
     if (resolved) {
-        img.src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(resolved.file)}?source=image`;
-        stage.classList.remove('hidden');
+        el('line-image').src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(resolved.file)}?source=image${langQ}`;
+        el('line-image-stage').classList.remove('hidden');
         el('preview-note').textContent = resolved.cardId;
     } else {
-        img.removeAttribute('src');
-        stage.classList.add('hidden');
-        el('preview-empty').classList.remove('hidden');
-        el('preview-note').textContent = candidates.length ? `No image for “${candidates[0]}”` : 'No card on this line';
+        el('line-image').removeAttribute('src');
+        showPreviewMessage(candidates.length ? `No image for “${candidates[0]}”` : 'No card on this line');
     }
 }
 
@@ -818,18 +928,19 @@ async function renderTextCardPreview() {
     const d = await res.json().catch(() => ({}));
     if (seq !== previewSeq) return;
     if (!res.ok || !d.cardId || !d.template) {
-        el('preview-empty').classList.remove('hidden');
-        el('preview-note').textContent = d && d.error === 'parse'
+        showPreviewMessage(d && d.error === 'parse'
             ? 'Fix the JSON5 to preview a card'
-            : 'Place the cursor inside a card block to preview it';
+            : 'Place the cursor inside a card block to preview it');
         return;
     }
     const templatePath = 'design/' + d.template;
     const tr = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(templatePath)}&lang=`);
     if (seq !== previewSeq) return;
     if (!tr.ok) {
-        el('preview-empty').classList.remove('hidden');
-        el('preview-note').textContent = `Template not found: ${templatePath}`;
+        showPreviewMessage(`Template not found: ${templatePath}`, {
+            label: 'Add Missing Template',
+            onClick: () => addMissingTemplate(d.template),
+        });
         return;
     }
     const html = (await tr.json()).content;
@@ -889,14 +1000,13 @@ function renderCardPreview(html) {
 }
 
 function renderCssPreview() {
-    if (!cardHtmlBase || !cardHtmlBase.content) {
-        el('preview-empty').classList.remove('hidden');
-        el('preview-note').textContent = 'No HTML template imports this CSS.';
-        return;
-    }
+    el('card-preview-bar').classList.toggle('hidden', templateCards.length === 0);
+    if (!templateCards.length) { showPreviewMessage('No HTML template imports this CSS.'); return; }
+    const card = templateCards.find(c => c.id === selectedCardId) || templateCards[0];
+    const html = substituteValues(card.htmlContent, { id: card.id, ...(card.values || {}) });
     el('card-stage').classList.remove('hidden');
-    el('card-preview').srcdoc = injectBase(injectLiveCss(cardHtmlBase.content, code.value));
-    el('preview-note').textContent = `· base: ${cardHtmlBase.name}`;
+    el('card-preview').srcdoc = injectBase(injectLiveCss(html, code.value));
+    el('preview-note').textContent = `card: ${card.id}`;
     fitPreview();
 }
 
@@ -1093,7 +1203,7 @@ function escapeHtml(s) {
 }
 
 // --- Wire up ---
-el('card-select').onchange = () => { selectedCardId = el('card-select').value; renderCardPreview(code.value); };
+el('card-select').onchange = () => { selectedCardId = el('card-select').value; renderPreview(); };
 el('settings-btn').onclick = async () => { if (await guardUnsaved()) openSettings(); };
 el('settings-browse-btn').onclick = pickFolder;
 el('settings-save-btn').onclick = saveSettings;
@@ -1105,7 +1215,7 @@ el('ov-preview-template-btn').onclick = () => previewImages('template');
 el('image-grid-close').onclick = closeImageGrid;
 el('image-detail-close').onclick = closeImageDetail;
 el('act-open-dist').onclick = () => { if (selectedId) fetch(`/api/open-dist?id=${encodeURIComponent(selectedId)}`); };
-el('act-back').onclick = () => setView('project');
+el('act-back').onclick = () => { refreshOverview(); setView('project'); };
 el('run-btn').onclick = startRun;
 el('close-editor-btn').onclick = closeEditor;
 el('save-btn').onclick = saveFile;
