@@ -1,5 +1,17 @@
 # TODOS
 
+## 4 June 2026
+
+- Create a default design template, that is copied when initiating a project that has a design folder (3_test and above). The design template has a card.html (for the specific card with a <style> section, that distinguishes that type of card), card.css (which have general card size and layout properties), and style.css (that has color, font, and text properties)
+- When editing html files, the design preview drop-down should also have the card name, f.ex. m01: Clairvoyance.
+- When editing css files, add a select box, where you can select a card, that uses a template that imports that css for previewing changes (right now it defaults to the first html file).
+- When editing a .text.json5, and the template html file does not exit, in the preview pane add a button "Add Missing Template". When pressing the button, it creates the missing file, and fills it with the default design template (card.html).
+- When editing a file in 1_idea, + New file should not be an option (idea projects are just one file)
+- In the category headers in the left panel, add how many projects exist in that category (f.ex. 1 Idea (13))
+- After Generate JPGs from templates, in the project overview the Preview Template Images does not appear until after a reload of the page.
+- When upgrading to playtest, add a <title>.info.json5, which contains { title, oneLiner, description, duration, playerCount, ages, language  }, that is displayed under the header in project overview (before the data information). If this file does not exist in a current project (playtest and above), generate it. This file may be created by the user in 2_draft and 3_test, and be displayed as well.
+- In the project overview, if there are more languages, add a select to switch between languages. If there are no .info file, just add "Default" as the main language. Generated templates will look in the <title>.<lang> folder for .text.cards, and in the same folder from the master image path.
+
 ## 3 June 2026
 
 - ~~No white background on image preview images (stay gray, so you can see the edges of the image)~~
@@ -8,20 +20,17 @@
 - ~~Generate rules pdf: remove information about which script it runs (in parenthesis)~~
 - ~~When clicking settings, remove selected project highlight.~~
 
-
 - ~~In Image preview, when clicking an image, open a right panel with the image to full-size (or window height - whichever it hits first.). The panel should have a close button, or close when the same image is clicked again.~~
 - ~~Templates actions: Remove (from templates) in button name. Add Generate Tabletop Simulator Files. Add Generate Boardgamemakers.com files.~~
 - ~~In Actions view, Run should be Generate. Remove the Clear button. Show the console view before clicking any buttons, with an inline: "Console output will appear here" or something like that (helpful).~~
 - ~~After generating things, have a link to the generated file/folder as well as its parent folder (_dist project folder) between the Run button and the Console view.~~
-- ~~Generate rules HTML: In Action view, add to description "using Github markdown style". Create a link to the generated _dist folder (or _dist/<project>) if no generated content exist yet.~~
+- ~~Generate rules HTML: In Action view, add to description "using Github markdown style". Create a link to the generated _dist folder (or_dist/<project>) if no generated content exist yet.~~
 - ~~Images/Templates Generate Print-and-Play PDF: Generated PDFS should be between Run and Console. The first line "Running...." does not appear until the script has finished - show that line immediately.~~
 - ~~Images/Templates Generate TTS: Description: Inform that the filenames will contain the exact rows and card amounts for each file, for use in the Tabletop Simulator Application.~~
 - ~~Images/Templates Generate Boardgamemakers.com: Inform that the images will be slightly changed (and how) for easy bulk upload to boardgamemakers.com~~
 - ~~Templates: Generate JPGS: Do not mention Puppeteer. If these files exist, then pressing Generate PDF/TTS/Boardgamemakers should use those, instead of generating new files from template. When pressing Run in those three actions, the user should be queried if they want to use the jpgs from that folder, or generate anew.~~
 - ~~When previewing images, add a link to the parent folder at the top: "Images - <project title> (<amount>) - <link to parent folder>".~~
 - ~~In the project overview, add a Template Images similar to the Images item, if those exist as separate jpgs (from the Generate JPGS option)~~
-
-
 
 - ~~Saved info (after pressing save in settings) is not centered and too much border radius.~~
 - ~~In previewing images, you should be able to change the amount (mod). Also should just display images in .cards.json5, not all images in folder.~~
@@ -31,7 +40,6 @@
 - ~~Scrolling a file still does not scroll the markdown preview.~~
 - ~~When previewing a template, add a select input at the top, where you can preview a specific card, that uses that template. Default to the first card.~~
 - ~~Hover over a category (1_idea, etc.) to tooltip the description of the category.~~
-
 
 ## 2 June 2026
 
@@ -49,7 +57,6 @@
 - ~~Scroll is not working in the editor.~~
 - ~~This is not version 1.0.0, but 0.1.0 we are working on.~~
 - ~~Can we avoid using winget in install.cmd? And use portable versions of node/git/pnpm? (Yes — install.cmd now downloads portable Node/Git/pnpm into the project's .runtime/.)~~
-
 
 ## 1 June 2026
 
