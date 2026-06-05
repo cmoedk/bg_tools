@@ -27,6 +27,7 @@ let previewSeq = 0;           // guards async previews against stale cursor move
 let currentFileMtime = 0;     // mtime of the open file (external-change detection)
 let lastTextKey = '';         // last card rendered in the .cards.text preview (de-blink)
 let lastLineImg = '';         // last image rendered in the .cards.json5 line preview
+let lineSource = 'image';     // .cards.json5 line preview source: 'image' | 'template'
 let conflictOpen = false;     // an external-change conflict modal is showing
 let currentActionOutput = ''; // output subfolder of the open action (e.g. 'tts')
 let cardHtmlBase = null;      // { name, content } base HTML for card/CSS preview
@@ -98,6 +99,9 @@ function setView(v) {
     el('right-actions').classList.toggle('hidden', !(v === 'project' || v === 'action'));
     el('right-preview').classList.toggle('hidden', v !== 'editor');
     el('workspace').classList.toggle('editor-mode', v === 'editor');
+    el('mid-header').textContent =
+        v === 'editor' ? 'Editor' : v === 'settings' ? 'Settings' :
+        v === 'action' ? 'Action' : v === 'project' ? 'Overview' : '';
     saveLocation();
 }
 
@@ -338,7 +342,14 @@ function renderActions() {
     if (!currentProject) { hint.textContent = 'Select a project.'; return; }
 
     // Editing is always available (rules / templates).
-    host.appendChild(actionGroup('Editing', [{ label: '📝 Edit Files', onClick: openEditor }]));
+    const editingItems = [{ label: '📝 Edit Files', onClick: openEditor }];
+    if (['3_test', '4_playtest', '5_prototype', '6_production'].includes(currentProject.status)) {
+        editingItems.push({
+            label: '📐 Edit Rules in A5 Print Tool',
+            onClick: () => alert('The A5 Print Tool is coming soon.'),
+        });
+    }
+    host.appendChild(actionGroup('Editing', editingItems));
 
     if (currentProject.canGenerate) {
         hint.textContent = config.imagePathValid ? '' : '⚠ Set the master image folder to generate.';
@@ -655,37 +666,66 @@ function closeImageGrid() {
     gridCells = [];
 }
 
-// --- Native folder picker for Settings ---
-async function pickFolder() {
-    const res = await fetch('/api/pick-folder');
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { el('settings-error').textContent = data.error || 'Folder picker unavailable.'; return; }
-    if (data.path) el('settings-image-path').value = data.path;
-}
-
-// --- Settings ---
-function openSettings() {
+// --- Settings: edit every config.ini value ---
+async function openSettings() {
     selectedId = null;       // Settings is not a project — clear the left-list highlight.
     renderProjects();
-    el('settings-image-path').value = config.imagePath || '';
     el('settings-error').textContent = '';
     setSettingsStatus('');
+    const host = el('settings-fields');
+    host.innerHTML = '<p class="muted">Loading…</p>';
     setView('settings');
-    setTimeout(() => el('settings-image-path').focus(), 30);
+    let entries = [];
+    try {
+        const res = await fetch('/api/config-raw');
+        if (res.ok) entries = (await res.json()).entries || [];
+    } catch { /* ignore */ }
+    host.innerHTML = '';
+    entries.forEach((e) => {
+        const row = document.createElement('div');
+        row.className = 'settings-row';
+        const label = document.createElement('label');
+        label.className = 'settings-label';
+        label.textContent = e.key;
+        const inputRow = document.createElement('div');
+        inputRow.className = 'row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'name-input';
+        input.value = e.value;
+        input.dataset.key = e.key;
+        inputRow.appendChild(input);
+        // The image folder gets a native folder picker.
+        if (e.key === 'paths.images') {
+            const browse = document.createElement('button');
+            browse.className = 'ghost';
+            browse.textContent = 'Browse…';
+            browse.onclick = async () => {
+                const r = await fetch('/api/pick-folder');
+                const d = await r.json().catch(() => ({}));
+                if (r.ok && d.path) input.value = d.path;
+            };
+            inputRow.appendChild(browse);
+        }
+        row.appendChild(label);
+        row.appendChild(inputRow);
+        host.appendChild(row);
+    });
 }
+
 async function saveSettings() {
     el('settings-error').textContent = '';
-    const value = el('settings-image-path').value.trim();
-    if (!value) { el('settings-error').textContent = 'Enter a path.'; return; }
+    const entries = [...el('settings-fields').querySelectorAll('input[data-key]')]
+        .map(i => ({ key: i.dataset.key, value: i.value }));
     setSettingsStatus('saving');
-    const res = await fetch('/api/image-path', {
+    const res = await fetch('/api/config-raw', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: value }),
+        body: JSON.stringify({ entries }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) { setSettingsStatus(''); el('settings-error').textContent = data.error || 'Failed to save.'; return; }
     setSettingsStatus('saved');
-    await loadConfig();
+    await loadConfig(); // refresh imagePath/languageNames/editorIndent
 }
 function setSettingsStatus(state) {
     const b = el('settings-status');
@@ -787,7 +827,6 @@ async function selectFile(path, lang = '') {
     currentFilePath = path;
     currentFileLang = lang;
     currentFileMtime = data.mtimeMs || 0;
-    el('file-name').textContent = path;
     code.value = data.content;
     currentKind = kindFromPath(path);
     currentJson5Mode = json5ModeForPath(path);
@@ -896,7 +935,6 @@ function startNewFile() {
         currentFilePath = name;
         currentFileLang = '';
         currentFileMtime = 0;
-        el('file-name').textContent = name;
         el('file-select').value = NEW_FILE;
         code.value = '';
         currentKind = kindFromPath(name);
@@ -951,7 +989,6 @@ async function reloadFiles(selectPath, selectLang = '') {
     renderFileSelect();
     if (selectPath && files.some(f => f.path === selectPath && (f.lang || '') === selectLang)) {
         el('file-select').value = `${selectLang || ''}|${selectPath}`;
-        el('file-name').textContent = selectPath;
     }
 }
 
@@ -1106,6 +1143,7 @@ function hideAllPreviews() {
     el('line-image-stage').classList.add('hidden');
     el('preview-empty').classList.add('hidden');
     el('card-preview-bar').classList.add('hidden');
+    el('line-source-bar').classList.add('hidden');
     el('edit-template-btn').classList.add('hidden');
     el('preview-note').textContent = '';
 }
@@ -1177,7 +1215,8 @@ function substituteValues(html, values) {
     return out;
 }
 
-// .cards.json5: show the master image for the card id on the cursor's line.
+// .cards.json5: show the master image (or rendered template JPG) for the card id
+// on the cursor's line. If both exist, a toggle lets you switch.
 async function renderLineImagePreview() {
     const seq = ++previewSeq;
     const line = currentLineText();
@@ -1187,24 +1226,39 @@ async function renderLineImagePreview() {
     for (const m of line.matchAll(/"([^"]+)"/g)) candidates.push(m[1]);
 
     const langQ = `&lang=${encodeURIComponent(currentFileLang)}`;
-    let resolved = null;
+    const resolve = (c, source) => fetch(`/api/resolve-card-image?id=${encodeURIComponent(selectedId)}&cardId=${encodeURIComponent(c)}&source=${source}${langQ}`)
+        .then(r => r.ok ? r.json() : { file: null }).then(d => d.file).catch(() => null);
+
+    let found = null;
     for (const c of candidates) {
-        const r = await fetch(`/api/resolve-card-image?id=${encodeURIComponent(selectedId)}&cardId=${encodeURIComponent(c)}&source=image${langQ}`);
+        const [imageFile, templateFile] = await Promise.all([resolve(c, 'image'), resolve(c, 'template')]);
         if (seq !== previewSeq) return; // cursor moved on — abandon
-        if (r.ok) { const d = await r.json(); if (d.file) { resolved = { cardId: c, file: d.file }; break; } }
+        if (imageFile || templateFile) { found = { cardId: c, imageFile, templateFile }; break; }
     }
     if (seq !== previewSeq) return;
-    if (resolved) {
-        const src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(resolved.file)}?source=image${langQ}`;
-        el('preview-empty').classList.add('hidden');
-        el('line-image-stage').classList.remove('hidden');
-        if (src !== lastLineImg) { el('line-image').src = src; lastLineImg = src; } // skip if unchanged (no blink)
-        el('preview-note').textContent = resolved.cardId;
-    } else {
+    if (!found) {
         lastLineImg = '';
+        el('line-source-bar').classList.add('hidden');
         el('line-image').removeAttribute('src');
         showPreviewMessage(candidates.length ? `No image for “${candidates[0]}”` : 'No card on this line');
+        return;
     }
+    const haveImage = !!found.imageFile, haveTemplate = !!found.templateFile;
+    // Toggle only when both sources exist.
+    const bar = el('line-source-bar');
+    bar.classList.toggle('hidden', !(haveImage && haveTemplate));
+    el('line-src-image').classList.toggle('active', lineSource === 'image');
+    el('line-src-template').classList.toggle('active', lineSource === 'template');
+
+    let src = lineSource;
+    if (src === 'template' && !haveTemplate) src = 'image';
+    if (src === 'image' && !haveImage) src = 'template';
+    const file = src === 'template' ? found.templateFile : found.imageFile;
+    const url = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(file)}?source=${src}${langQ}`;
+    el('preview-empty').classList.add('hidden');
+    el('line-image-stage').classList.remove('hidden');
+    if (url !== lastLineImg) { el('line-image').src = url; lastLineImg = url; } // skip if unchanged (no blink)
+    el('preview-note').textContent = `${found.cardId} (${src})`;
 }
 
 // .cards.text.json5: render the template of the card block the cursor is in.
@@ -1540,7 +1594,8 @@ el('card-select').onchange = () => { selectedCardId = el('card-select').value; r
 el('settings-btn').onclick = async () => { if (await guardUnsaved()) openSettings(); };
 el('settings-browse-btn').onclick = pickFolder;
 el('settings-save-btn').onclick = saveSettings;
-el('settings-image-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
+el('line-src-image').onclick = () => { lineSource = 'image'; renderLineImagePreview(); };
+el('line-src-template').onclick = () => { lineSource = 'template'; renderLineImagePreview(); };
 el('ov-promote-btn').onclick = () => { if (selectedId) promoteProject(selectedId); };
 el('ov-archive-btn').onclick = archiveProject;
 el('ov-preview-images-btn').onclick = () => previewImages('image');

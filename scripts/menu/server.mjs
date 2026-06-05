@@ -1195,6 +1195,27 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, { ok: true, imagePath: IMAGE_PATH });
         }
 
+        // Full config.ini as ordered key/value entries (for the Settings editor).
+        if (pathname === '/api/config-raw' && req.method === 'GET') {
+            const map = await readConfigMap();
+            return sendJson(res, 200, { entries: Object.entries(map).map(([key, value]) => ({ key, value })) });
+        }
+
+        // Save the full config.ini from the Settings editor.
+        if (pathname === '/api/config-raw' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const entries = Array.isArray(body.entries) ? body.entries : [];
+            const map = {};
+            for (const e of entries) {
+                const key = String(e.key || '').trim();
+                if (!/^[\w-]+(\.[\w-]+)*$/.test(key)) continue; // safe key only
+                map[key] = String(e.value ?? '');
+            }
+            await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8');
+            IMAGE_PATH = (map['paths.images'] || '').replace(/\\/g, '/');
+            return sendJson(res, 200, { ok: true });
+        }
+
         // --- Projects ---
         if (pathname === '/api/projects' && req.method === 'GET') {
             return sendJson(res, 200, await listProjects());

@@ -7,20 +7,18 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="workspace-body">
-    <header>
-        <h1>🎲 bg_tools</h1>
-    </header>
-
     <!-- Three-pane workspace -->
     <div id="workspace">
         <!-- LEFT: projects grouped by status folder, + Settings at the bottom -->
         <aside id="projects" class="pane projects-pane">
+            <div class="pane-header">Projects</div>
             <div id="project-groups" class="project-groups"></div>
             <button id="settings-btn" class="ghost settings-btn">⚙ Settings</button>
         </aside>
 
         <!-- MIDDLE: project view / action view / editor / settings (one at a time) -->
         <section id="editor" class="pane editor-pane">
+            <div id="mid-header" class="pane-header"></div>
             <div id="mid-empty" class="pane-empty">
                 <p>Select a project on the left, or add one with <strong>+ Add</strong>.</p>
             </div>
@@ -78,14 +76,13 @@
                         <span id="ed-status" class="status-chip"></span>
                         <span id="ed-name" class="project-name"></span>
                     </div>
-                    <button id="close-editor-btn" class="ghost">✕ Close Editor</button>
+                    <button id="close-editor-btn" class="ghost" title="Close Editor">✕</button>
                 </div>
                 <div class="editor-toolbar">
                     <select id="file-select" class="select" title="Project files"></select>
-                    <span id="file-name" class="file-name-display"></span>
                     <button id="save-btn">Save</button>
-                    <button id="bump-btn" class="ghost hidden">Bump version</button>
                     <button id="rename-btn" class="ghost">Rename</button>
+                    <button id="bump-btn" class="ghost hidden">Bump version</button>
                     <span id="save-status" class="badge"></span>
                     <button id="delete-file-btn" class="danger" title="Delete file">🗑</button>
                 </div>
@@ -93,18 +90,15 @@
                 <div id="editor-error" class="error"></div>
             </div>
 
-            <!-- Settings -->
+            <!-- Settings (all config.ini values, rendered dynamically) -->
             <div id="mid-settings" class="mid-view hidden">
                 <div class="view-head"><h2>Settings</h2></div>
-                <label class="settings-label" for="settings-image-path">Master image folder</label>
+                <div id="settings-fields" class="settings-fields"></div>
                 <div class="row">
-                    <input id="settings-image-path" type="text" class="name-input" placeholder="e.g. D:\images\master" autocomplete="off">
-                    <button id="settings-browse-btn" class="ghost">Browse…</button>
                     <button id="settings-save-btn">Save</button>
                     <span id="settings-status" class="badge"></span>
                 </div>
-                <p class="muted">bg_tools looks here for each game's card images, in a subfolder named after the
-                    project. Saved to <code>config.ini</code> in the project root.</p>
+                <p class="muted">All settings are stored in <code>config.ini</code> in the project root.</p>
                 <div id="settings-error" class="error"></div>
             </div>
         </section>
@@ -124,7 +118,11 @@
                 <div id="card-preview-bar" class="card-preview-bar hidden">
                     <label id="card-select-label" for="card-select">Card:</label>
                     <select id="card-select" class="select"></select>
-                    <button id="edit-template-btn" class="ghost hidden">Edit Template</button>
+                    <button id="edit-template-btn" class="hidden">Edit Template</button>
+                </div>
+                <div id="line-source-bar" class="line-source-bar hidden">
+                    <button id="line-src-image" class="ghost">Images</button>
+                    <button id="line-src-template" class="ghost">Templates</button>
                 </div>
                 <div id="preview-host" class="preview-host">
                     <iframe id="md-preview" class="md-preview-frame hidden" sandbox="allow-same-origin"></iframe>

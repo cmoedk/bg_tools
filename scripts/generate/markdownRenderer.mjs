@@ -1102,6 +1102,8 @@ export const MARKDOWN_CSS = `
  * @returns {string}
  */
 export function renderMarkdownDocument(markdown, title = '') {
+    // Hide HTML comments (<!-- ... -->) from the rendered output.
+    markdown = String(markdown).replace(/<!--[\s\S]*?-->/g, '');
     return `
           <!doctype html>
           <html>
