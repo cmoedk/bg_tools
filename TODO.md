@@ -1,5 +1,20 @@
 # TODOS
 
+## 5 June 2026
+
+- After clicking "Add Missing Template", the new file is not added to the file select element.
+- If an external program alters a file already being edited and no changes has been made, update the current file being edited to the file on disk.
+- If an external program alters a file already being edited and changes has been made, ask the user what to do (overwrite file on disk, keep file on disk, cancel).
+- When moving line to line in .cards.text, the preview blinks. Do not update the preview, if it the same card being rendered.
+- Track where the user is. If in a specific project, editing a specific file, remember where, and restore that location on reload/revisit. Use localstorage for that data.
+- In the file-list, remove the <title> part of the "official" files (_rules, .cards, .cards.text, .info, .notes, .changelog). Also move those files to the top of the select under a <optgroup> header (with additional languages under their own optgroup header named after the language). Have the rest in a Misc. optgroup., and then + New file at the bottom.
+- Under "Add Missing Template", add a "Add All Missing Templates" if multiple template files are missing.
+- In config, add a list to get language names from: da=dansk, en=english
+- In all Generate actions, the Output folder is the same. Show the output folder for that Generate options (fex <title>/tts, or <title>/pnp_pdf), which is also the target of the Open Folder.
+- In all Generate actions, add a Delete Output Folder button, with a window.confirm before the folder is cleared.
+- Only show Generate action categories Images and Templates if Master Image Path has images/project folder, and the project has a .cards.text file (respectively).
+- When editing a rules file in 3_test and above, add the button "Bump version". When pressing the button, allow the user to edit the current version (f.ex. from 2.5 to 2.6 - as a string or prompt), and rename the rules file accordingly.
+
 ## 4 June 2026
 
 - ~~Create a default design template, that is copied when initiating a project that has a design folder (3_test and above). The design template has a card.html (for the specific card with a <style> section, that distinguishes that type of card), card.css (which have general card size and layout properties), and style.css (that has color, font, and text properties)~~
