@@ -2,6 +2,13 @@
 
 ## 5 June 2026
 
+- Move the X (close editor) into the editor header (at the end of the Editor header line)
+- The Images/Templates buttons toggle should be centered in the preview pane.
+- Print and play pdf from images should save to pnp_pdf_img. Print and play pdf from templates should save to pnp_pdf_tpl. Same with tts_img/tts_tpl/bgm_img/bgm_tpl.
+- When saving the .info file, the overview pane is not updated.
+- In Overview HR line between .info text and folder information.
+- Auto-open Edit Files, when clicking a project in 1_idea.
+
 - ~~Do not show filename <span> in editor (#file-name). Rename X Close Editor, to just X. Move Rename before Bump Version.~~
 - ~~All config.ini settings should be editable from Settings menu.~~
 - ~~Under Edit Files, add "Edit Rules in A5 Print Tool" for 3_test and above. For now, add an alert, that says the tool is soon available.~~
