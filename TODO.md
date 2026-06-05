@@ -2,6 +2,15 @@
 
 ## 5 June 2026
 
+- Do not show filename <span> in editor (#file-name). Rename X Close Editor, to just X. Move Rename before Bump Version.
+- All config.ini settings should be editable from Settings menu.
+- Under Edit Files, add "Edit Rules in A5 Print Tool" for 3_test and above. For now, add an alert, that says the tool is soon available.
+- In the Projecs pane, add a "Projects" header. In the middle pane add a "Overview/Editor" header
+- Remove the bg_tools main header. It does nothing, but take up space.
+- Center the Edit Template button and make it blue background.
+- When editing .cards.json5, in the preview pane, add a toggle to switch between Images and Templates (JPGS) if both are present. Else just view whichever is present.
+- When parsing markdown, we want HTML comments hidden. 
+
 - ~~Indent json5 correctly on save. Add a indentation config value, and set it to 2 spaces. (also use that setting when pressing tab)~~
 - ~~When previewing a template (when editing .cards.text), add a button in the preview: Edit Template. This opens the template file in the editor file list.~~
 - ~~Promote button should be black, not blue. Blue draws too much attention, and it is a rare action.~~
