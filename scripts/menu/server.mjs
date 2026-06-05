@@ -57,36 +57,42 @@ const MENU_OPTIONS = [
     {
         label: 'Generate rules HTML',
         group: 'Rules',
+        output: '',
         script: path.join(GENERATE_DIR, 'generate_html.mjs'),
         description: "Renders the project's rules markdown into a styled, standalone HTML file in _dist, using GitHub markdown style.",
     },
     {
         label: 'Generate rules PDF',
         group: 'Rules',
+        output: '',
         script: path.join(PROJECT_ROOT, 'generate_rules_pdf.js'),
         description: 'Generates a PDF of the rules.',
     },
     {
         label: 'Generate Print-and-Play PDF',
         group: 'Images',
+        output: 'pnp_pdf',
         script: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs'),
         description: 'Builds a print-and-play PDF laid out from the card images in the master image folder.',
     },
     {
         label: 'Generate Tabletop Simulator Files',
         group: 'Images',
+        output: 'tts',
         script: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
         description: 'Packs the card images into Tabletop Simulator deck sheets. Each filename encodes the card count, rows and columns, for import into the Tabletop Simulator application.',
     },
     {
         label: 'Generate Boardgamemakers.com files',
         group: 'Images',
+        output: 'bgm',
         script: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
         description: 'Writes each card front/back image for boardgamemakers.com. Each image is slightly altered (~10% of its pixels nudged ±1% in brightness) so identical cards get unique file content for bulk upload.',
     },
     {
         label: 'Generate Print-and-Play PDF',
         group: 'Templates',
+        output: 'test',
         script: path.join(GENERATE_DIR, 'generate_template_pnp_pdf.mjs'),
         imageScript: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs'),
         description: 'Renders each card from its HTML template (in design/) and assembles a print-and-play PDF.',
@@ -94,12 +100,14 @@ const MENU_OPTIONS = [
     {
         label: 'Generate JPGs',
         group: 'Templates',
+        output: 'template_jpg',
         script: path.join(GENERATE_DIR, 'generate_jpgs_from_templates.mjs'),
         description: 'Renders each card from its HTML template (in design/) and saves one JPG per card to _dist/<project>/template_jpg.',
     },
     {
         label: 'Generate Tabletop Simulator Files',
         group: 'Templates',
+        output: 'tts',
         script: path.join(GENERATE_DIR, 'generate_template_tts_files.mjs'),
         imageScript: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
         description: 'Renders each card from its HTML template (in design/) and packs them into Tabletop Simulator deck sheets. Each filename encodes the card count, rows and columns, for the Tabletop Simulator application.',
@@ -107,6 +115,7 @@ const MENU_OPTIONS = [
     {
         label: 'Generate Boardgamemakers.com files',
         group: 'Templates',
+        output: 'bgm',
         script: path.join(GENERATE_DIR, 'generate_template_bgm_files.mjs'),
         imageScript: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
         description: 'Renders each card from its HTML template (in design/) and writes card front/back files for boardgamemakers.com. Each image is slightly altered (~10% of its pixels nudged ±1% in brightness) so identical cards get unique content for bulk upload.',
@@ -180,7 +189,19 @@ async function ensureConfig() {
     if (existsSync(CONFIG_FILE)) return;
     const map = await readConfigMap();
     if (!('paths.images' in map)) map['paths.images'] = '';
+    if (!('languages.da' in map)) map['languages.da'] = 'dansk';
+    if (!('languages.en' in map)) map['languages.en'] = 'english';
     try { await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8'); } catch { /* read-only fs */ }
+}
+
+// Map of language code -> display name from config.ini ([languages] da = dansk, ...).
+async function readLanguageNames() {
+    const map = await readConfigMap();
+    const names = {};
+    for (const [k, v] of Object.entries(map)) {
+        if (k.startsWith('languages.')) names[k.slice('languages.'.length)] = v;
+    }
+    return names;
 }
 
 // The master image folder, read from config.ini ([paths] images = ...).
@@ -536,17 +557,24 @@ async function projectOverview(project, lang = '') {
         }
     }
 
-    // Available languages: the base ("Default") plus any .xx variant folders.
+    // Available languages: the base ("Default") plus any .xx variant folders,
+    // labelled from config.ini ([languages] da = dansk, ...) when available.
+    const langNames = await readLanguageNames();
     const languages = [{ code: '', label: (info && info.language) || 'Default' }]
-        .concat(variants.map(v => ({ code: v.lang, label: v.lang })));
+        .concat(variants.map(v => ({ code: v.lang, label: langNames[v.lang] || v.lang })));
 
     const showAssets = !(project.status === '1_idea' || project.status === '2_draft');
     let cards = null;
     let images = { configured: false };
     let templateImages = { exists: false, count: 0 };
+    let hasText = false;
     if (showAssets) {
         cards = await readCardsOverview(dir);
         images = await imagesSummary(assetName);
+        // A .cards.text.json5 in the (variant) folder enables the Templates actions.
+        try {
+            hasText = (await fs.readdir(dir)).some(n => /\.cards\.text\.json5$/i.test(n) || /\.text\.json5$/i.test(n));
+        } catch { /* none */ }
         // JPGs previously rendered from templates (Generate JPGs -> _dist/<name>/template_jpg).
         try {
             const tdir = path.join(DIST_DIR, assetName, 'template_jpg');
@@ -557,7 +585,7 @@ async function projectOverview(project, lang = '') {
 
     return {
         id: project.id, name: project.name, status: project.status,
-        canGenerate: project.canGenerate, showAssets, createdMs, cards, images, templateImages,
+        canGenerate: project.canGenerate, showAssets, createdMs, cards, images, templateImages, hasText,
         info, languages, lang: useVariant ? lang : '',
     };
 }
@@ -1060,20 +1088,42 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, {
                 imagePath: image.path,
                 imagePathValid: image.valid,
-                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '', group: o.group || 'Other', hasImageAlt: !!o.imageScript })),
+                actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '', group: o.group || 'Other', hasImageAlt: !!o.imageScript, output: o.output || '' })),
                 statusFolders: STATUS_FOLDERS.map(f => ({ ...f, canGenerate: GENERATE_FOLDERS.has(f.key) })),
+                languageNames: await readLanguageNames(),
             });
         }
 
-        // Open a project's _dist output folder in the file explorer (Windows).
+        // Resolve a generator output folder: _dist/<name>[.lang]/<sub>. Returns null if invalid.
+        const outputDir = (project, sub, lang) => {
+            if (typeof sub !== 'string' || sub.includes('..') || sub.includes('/') || sub.includes('\\')) return null;
+            const assetName = lang ? `${project.name}.${lang}` : project.name;
+            const base = path.join(DIST_DIR, assetName);
+            return sub ? path.join(base, sub) : base;
+        };
+
+        // Open a generator's _dist output folder in the file explorer (Windows).
         if (pathname === '/api/open-dist' && req.method === 'GET') {
             if (process.platform !== 'win32') return sendJson(res, 400, { error: 'Opening folders is only available on Windows.' });
             const project = resolveProject(url.searchParams.get('id'));
-            let dir = DIST_DIR;
-            if (project && existsSync(path.join(DIST_DIR, project.name))) dir = path.join(DIST_DIR, project.name);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const dir = outputDir(project, url.searchParams.get('sub') || '', url.searchParams.get('lang') || '');
+            if (!dir) return sendJson(res, 400, { error: 'Invalid output folder.' });
             try { await fs.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
             spawn('explorer', [path.resolve(dir)], { detached: true }).unref();
             return sendJson(res, 200, { ok: true, dir: path.relative(PROJECT_ROOT, dir).replace(/\\/g, '/') });
+        }
+
+        // Delete a generator's _dist output folder (after a client-side confirm).
+        if (pathname === '/api/delete-output' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const dir = outputDir(project, (body.sub || '').trim(), body.lang || '');
+            const distAbs = path.resolve(DIST_DIR);
+            if (!dir || !path.resolve(dir).startsWith(distAbs)) return sendJson(res, 400, { error: 'Invalid output folder.' });
+            try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+            return sendJson(res, 200, { ok: true });
         }
 
         // Open a project's image source folder in the file explorer (Windows).
@@ -1301,9 +1351,25 @@ const server = http.createServer(async (req, res) => {
             if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
             try {
                 const content = await fs.readFile(abs, 'utf-8');
-                return sendJson(res, 200, { path: url.searchParams.get('path'), content });
+                let mtimeMs = 0;
+                try { mtimeMs = (await fs.stat(abs)).mtimeMs; } catch { /* ignore */ }
+                return sendJson(res, 200, { path: url.searchParams.get('path'), content, mtimeMs });
             } catch {
                 return sendJson(res, 404, { error: 'File not found.' });
+            }
+        }
+
+        // Lightweight mtime check for detecting external edits to the open file.
+        if (pathname === '/api/file-stat' && req.method === 'GET') {
+            const project = resolveProject(url.searchParams.get('id'));
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const abs = resolveProjectFile(project, url.searchParams.get('path') || '', url.searchParams.get('lang') || '');
+            if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
+            try {
+                const st = await fs.stat(abs);
+                return sendJson(res, 200, { exists: true, mtimeMs: st.mtimeMs });
+            } catch {
+                return sendJson(res, 200, { exists: false, mtimeMs: 0 });
             }
         }
 
@@ -1315,7 +1381,46 @@ const server = http.createServer(async (req, res) => {
             if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
             await fs.mkdir(path.dirname(abs), { recursive: true });
             await fs.writeFile(abs, body.content ?? '', 'utf-8');
-            return sendJson(res, 200, { ok: true, path: body.path });
+            let mtimeMs = 0;
+            try { mtimeMs = (await fs.stat(abs)).mtimeMs; } catch { /* ignore */ }
+            return sendJson(res, 200, { ok: true, path: body.path, mtimeMs });
+        }
+
+        // List card templates referenced in the posted .cards.text content that are
+        // missing from the project's design/ folder (for "Add All Missing Templates").
+        if (pathname === '/api/missing-templates' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project || project.kind !== 'folder') return sendJson(res, 400, { error: 'Invalid project.' });
+            let data;
+            try { data = JSON5.parse(String(body.content || '')); } catch { return sendJson(res, 200, { missing: [] }); }
+            const referenced = [...new Set(extractTextCards(data).map(c => c.template).filter(Boolean))];
+            const designDir = path.join(project.folderDir, 'design');
+            const missing = [];
+            for (const t of referenced) {
+                if (!existsSync(path.join(designDir, t))) missing.push(t);
+            }
+            return sendJson(res, 200, { missing });
+        }
+
+        // Rename a versioned rules file to a new version (Bump version).
+        if (pathname === '/api/bump-version' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const version = String(body.version || '').trim();
+            if (!/^[0-9][0-9.]*$/.test(version)) return sendJson(res, 400, { error: 'Version must be digits and dots (e.g. 2.6).' });
+            const abs = resolveProjectFile(project, (body.path || '').trim(), body.lang || '');
+            if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
+            const base = path.basename(abs);
+            // <title>_rules_<version>[.<lang>].<stage>.md
+            const m = base.match(/^(.*_rules_)([0-9][0-9.]*)((?:\.[a-z]{2})?)(\.[a-z]+)(\.md)$/i);
+            if (!m) return sendJson(res, 400, { error: 'Not a versioned rules file.' });
+            const newName = `${m[1]}${version}${m[3]}${m[4]}${m[5]}`;
+            const newAbs = path.join(path.dirname(abs), newName);
+            if (existsSync(newAbs)) return sendJson(res, 409, { error: `${newName} already exists.` });
+            await fs.rename(abs, newAbs);
+            return sendJson(res, 200, { ok: true, path: newName });
         }
 
         // Render markdown to a full HTML document (matches the rules HTML generator)

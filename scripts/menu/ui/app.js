@@ -24,6 +24,11 @@ let currentJson5Mode = null;  // for json5: 'cards' (line→image) | 'text' (cur
 let lastCursorLine = -1;
 let cursorTimer = null;
 let previewSeq = 0;           // guards async previews against stale cursor moves
+let currentFileMtime = 0;     // mtime of the open file (external-change detection)
+let lastTextKey = '';         // last card rendered in the .cards.text preview (de-blink)
+let lastLineImg = '';         // last image rendered in the .cards.json5 line preview
+let conflictOpen = false;     // an external-change conflict modal is showing
+let currentActionOutput = ''; // output subfolder of the open action (e.g. 'tts')
 let cardHtmlBase = null;      // { name, content } base HTML for card/CSS preview
 let templateCards = [];       // cards (id + values) that use the previewed template
 let selectedCardId = null;    // which card's values fill the template preview
@@ -42,6 +47,33 @@ const stopBtn = el('stop-btn');
 async function init() {
     await loadConfig();
     await loadProjects();
+    await restoreLocation();
+    setInterval(checkExternalChange, 2500);
+    window.addEventListener('focus', checkExternalChange);
+}
+
+// --- Remember where the user is (project / file), restore on reload ---
+const LOC_KEY = 'bg_tools.location';
+function saveLocation() {
+    try {
+        localStorage.setItem(LOC_KEY, JSON.stringify({
+            id: selectedId, view: currentView, file: currentFilePath, lang: currentFileLang,
+        }));
+    } catch { /* storage unavailable */ }
+}
+async function restoreLocation() {
+    let loc;
+    try { loc = JSON.parse(localStorage.getItem(LOC_KEY) || 'null'); } catch { loc = null; }
+    if (!loc || !loc.id) return;
+    const exists = projects.folders.some(g => g.projects.some(p => p.id === loc.id));
+    if (!exists) return;
+    await selectProject(loc.id);
+    if (loc.view === 'editor') {
+        await openEditor();
+        if (loc.file && files.some(f => f.path === loc.file && (f.lang || '') === (loc.lang || ''))) {
+            await selectFile(loc.file, loc.lang || '');
+        }
+    }
 }
 
 async function loadConfig() {
@@ -66,6 +98,48 @@ function setView(v) {
     el('right-actions').classList.toggle('hidden', !(v === 'project' || v === 'action'));
     el('right-preview').classList.toggle('hidden', v !== 'editor');
     el('workspace').classList.toggle('editor-mode', v === 'editor');
+    saveLocation();
+}
+
+// --- External-change detection (items 2/3) ---
+async function reloadCurrentFileFromDisk() {
+    const res = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(currentFilePath)}&lang=${encodeURIComponent(currentFileLang)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    code.value = data.content;
+    currentFileMtime = data.mtimeMs || 0;
+    dirty = false;
+    lastTextKey = '';
+    lastLineImg = '';
+    setSaveStatus('');
+    renderPreview();
+}
+
+async function checkExternalChange() {
+    if (currentView !== 'editor' || !currentFilePath || conflictOpen) return;
+    let d;
+    try {
+        const r = await fetch(`/api/file-stat?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(currentFilePath)}&lang=${encodeURIComponent(currentFileLang)}`);
+        if (!r.ok) return;
+        d = await r.json();
+    } catch { return; }
+    if (!d.exists || d.mtimeMs <= currentFileMtime + 1) return; // unchanged on disk
+
+    if (!dirty) { await reloadCurrentFileFromDisk(); return; }
+
+    // Local edits + external change -> ask the user.
+    conflictOpen = true;
+    const finish = () => { currentFileMtime = d.mtimeMs; conflictOpen = false; closeModal(); };
+    openModal({
+        title: 'File changed on disk',
+        body: `<p>“${escapeHtml(currentFilePath)}” was changed by another program, but you have unsaved edits.</p>`,
+        onDismiss: () => { currentFileMtime = d.mtimeMs; conflictOpen = false; },
+        buttons: [
+            btnGhost('Cancel', finish), // keep editing mine, leave disk as-is
+            btnGhost('Keep disk', async () => { finish(); await reloadCurrentFileFromDisk(); }),
+            btnPrimary('Overwrite disk', async () => { conflictOpen = false; closeModal(); await saveFile(); }),
+        ],
+    });
 }
 
 // --- Left: projects ---
@@ -126,10 +200,9 @@ async function selectProject(id) {
     renderProjects();
     const ov = await fetchOverview();
     if (!ov) { setView('empty'); return; }
-    currentProject = { id: ov.id, name: ov.name, status: ov.status, canGenerate: ov.canGenerate };
-    renderOverview(ov);
-    renderActions();
+    renderOverview(ov); // sets currentProject (incl. asset flags) + renders the action list
     setView('project');
+    saveLocation();
 }
 
 async function fetchOverview() {
@@ -184,12 +257,18 @@ function renderInfo(info) {
 }
 
 function renderOverview(ov) {
+    currentProject = {
+        id: ov.id, name: ov.name, status: ov.status, canGenerate: ov.canGenerate,
+        hasImages: !!(ov.images && ov.images.hasFolder && ov.images.count > 0),
+        hasText: !!ov.hasText,
+    };
     el('ov-status').textContent = statusLabel(ov.status);
     el('ov-name').textContent = ov.name;
     el('ov-promote-btn').classList.toggle('hidden', ov.status === '7_archive');
     el('ov-archive-btn').classList.toggle('hidden', ov.status === '7_archive');
     renderLanguageSelect(ov);
     renderInfo(ov.info);
+    renderActions();
 
     const dl = el('ov-details');
     dl.innerHTML = '';
@@ -267,6 +346,9 @@ function renderActions() {
         config.actions.forEach((a) => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
         ACTION_GROUP_ORDER.forEach((g) => {
             if (!byGroup[g]) return;
+            // Images need card images in the master folder; Templates need a .cards.text file.
+            if (g === 'Images' && !currentProject.hasImages) return;
+            if (g === 'Templates' && !currentProject.hasText) return;
             host.appendChild(actionGroup(g, byGroup[g].map((a) => ({
                 label: a.label, title: a.description, onClick: () => openAction(a.index),
             }))));
@@ -300,9 +382,11 @@ function actionGroup(title, items) {
 function openAction(index) {
     currentActionIndex = index;
     const a = config.actions[index];
+    currentActionOutput = a.output || '';
     el('act-title').textContent = a.label;
     el('act-desc').textContent = a.description || '';
-    el('act-output-path').textContent = `_dist/${currentProject.name}/`;
+    const assetName = `${currentProject.name}${currentLang ? '.' + currentLang : ''}`;
+    el('act-output-path').textContent = `_dist/${assetName}/${currentActionOutput ? currentActionOutput + '/' : ''}`;
     consoleEl.textContent = '';
     el('pdf-results').classList.add('hidden');
     el('pdf-list').innerHTML = '';
@@ -634,17 +718,39 @@ async function closeEditor() {
 }
 
 function fileValue(f) { return `${f.lang || ''}|${f.path}`; }
-function fileLabel(f) { return f.lang ? `${f.path}  (${f.lang})` : f.path; }
+
+// The "official" Moe & Spil files (rules/cards/info/notes/changelog/idea).
+function isOfficialFile(p) {
+    return /(_rules[_.]|\.cards\.json5$|\.cards\.text\.json5$|\.cards\.errata\.json5$|\.info\.(md|json5)$|\.notes\.md$|\.changelog\.md$|\.idea\.md$)/i.test(p);
+}
+// Drop the leading "<title>" from official filenames for a cleaner label.
+function fileLabel(f) {
+    const name = currentProject ? currentProject.name : '';
+    if (isOfficialFile(f.path) && f.path.startsWith(name)) return f.path.slice(name.length);
+    return f.path;
+}
+function langName(code) { return (config.languageNames && config.languageNames[code]) || code; }
 
 function renderFileSelect() {
     const sel = el('file-select');
     sel.innerHTML = '';
-    files.forEach((f) => {
-        const opt = document.createElement('option');
-        opt.value = fileValue(f);
-        opt.textContent = fileLabel(f);
-        sel.appendChild(opt);
-    });
+    const addGroup = (label, items) => {
+        if (!items.length) return;
+        const og = document.createElement('optgroup');
+        og.label = label;
+        items.forEach((f) => {
+            const o = document.createElement('option');
+            o.value = fileValue(f);
+            o.textContent = fileLabel(f);
+            og.appendChild(o);
+        });
+        sel.appendChild(og);
+    };
+    // Official base files first, then a group per language, then everything else.
+    addGroup('Files', files.filter(f => !f.lang && isOfficialFile(f.path)));
+    [...new Set(files.filter(f => f.lang).map(f => f.lang))]
+        .forEach(code => addGroup(langName(code), files.filter(f => f.lang === code)));
+    addGroup('Misc.', files.filter(f => !f.lang && !isOfficialFile(f.path)));
     // Idea projects are a single file — no "New file" option.
     if (!currentProject || currentProject.status !== '1_idea') {
         const nw = document.createElement('option');
@@ -678,14 +784,18 @@ async function selectFile(path, lang = '') {
     setEditorError('');
     currentFilePath = path;
     currentFileLang = lang;
+    currentFileMtime = data.mtimeMs || 0;
     el('file-name').value = path;
     el('file-name').readOnly = true;
     code.value = data.content;
     currentKind = kindFromPath(path);
     currentJson5Mode = json5ModeForPath(path);
     lastCursorLine = -1;
+    lastTextKey = '';
+    lastLineImg = '';
     dirty = false;
     setSaveStatus('');
+    updateBumpButton();
     if (currentKind === 'html') {
         cardHtmlBase = { name: path, content: data.content, path, lang };
         await loadTemplateCards(path, lang);
@@ -693,6 +803,46 @@ async function selectFile(path, lang = '') {
         await loadCssCards(path, lang);
     }
     renderPreview();
+    saveLocation();
+}
+
+// --- Bump version (rules files, 3_test and above) ---
+function isRulesFile(p) { return /_rules_[0-9]/i.test(p) && /\.md$/i.test(p); }
+function updateBumpButton() {
+    const show = currentProject
+        && ['3_test', '4_playtest', '5_prototype', '6_production'].includes(currentProject.status)
+        && currentFilePath && isRulesFile(currentFilePath);
+    el('bump-btn').classList.toggle('hidden', !show);
+}
+function bumpVersion() {
+    if (!currentFilePath || !isRulesFile(currentFilePath)) return;
+    const cur = (currentFilePath.match(/_rules_([0-9][0-9.]*)/i) || [, ''])[1];
+    const wrap = document.createElement('div');
+    const lbl = document.createElement('p');
+    lbl.className = 'muted';
+    lbl.textContent = `New version for ${currentFilePath}:`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'name-input modal-input';
+    input.value = cur;
+    wrap.appendChild(lbl);
+    wrap.appendChild(input);
+    const doBump = async () => {
+        const version = input.value.trim();
+        if (!/^[0-9][0-9.]*$/.test(version)) { setModalError('Version must be digits and dots (e.g. 2.6).'); return; }
+        const r = await fetch('/api/bump-version', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: selectedId, path: currentFilePath, lang: currentFileLang, version }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setModalError(d.error || 'Could not rename.'); return; }
+        closeModal();
+        await reloadFiles(d.path, currentFileLang);
+        selectFile(d.path, currentFileLang);
+    };
+    openModal({ title: 'Bump version', body: wrap, buttons: [btnCancel(), btnPrimary('Rename', doBump)] });
+    setTimeout(() => input.focus(), 50);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doBump(); });
 }
 
 // Load the cards that use this template (for the preview card selector).
@@ -733,8 +883,10 @@ function startNewFile() {
     code.value = '';
     currentKind = null;
     currentJson5Mode = null;
+    currentFileMtime = 0;
     dirty = false;
     setSaveStatus('');
+    updateBumpButton();
     renderPreview();
 }
 
@@ -757,9 +909,11 @@ async function saveFile() {
     setSaveStatus('saved');
     dirty = false;
     currentFilePath = name;
+    currentFileMtime = data.mtimeMs || 0;
     currentKind = kindFromPath(name);
     currentJson5Mode = json5ModeForPath(name);
     if (currentKind === 'html') cardHtmlBase = { name, content: code.value, path: name, lang: currentFileLang };
+    updateBumpButton();
     await reloadFiles(name, currentFileLang);
     renderPreview();
     return true;
@@ -848,17 +1002,19 @@ function hideAllPreviews() {
     el('preview-note').textContent = '';
 }
 
-// Show a centered message in the preview pane, optionally with an action button.
-function showPreviewMessage(text, action) {
+// Show a centered message in the preview pane, optionally with action button(s).
+function showPreviewMessage(text, actions) {
+    el('card-stage').classList.add('hidden');
+    el('line-image-stage').classList.add('hidden');
     const host = el('preview-empty');
     host.innerHTML = '';
     const p = document.createElement('p');
     p.textContent = text;
     host.appendChild(p);
-    if (action) {
+    for (const a of [].concat(actions || [])) {
         const b = document.createElement('button');
-        b.textContent = action.label;
-        b.onclick = action.onClick;
+        b.textContent = a.label;
+        b.onclick = a.onClick;
         host.appendChild(b);
     }
     host.classList.remove('hidden');
@@ -871,6 +1027,28 @@ async function addMissingTemplate(name) {
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { openAlert('Add template', d.error || 'Could not create template.'); return; }
+    await reloadFiles(currentFilePath, currentFileLang); // surface the new design/ file in the list
+    lastTextKey = '';
+    renderPreview();
+}
+
+async function addAllMissingTemplates() {
+    let missing = [];
+    try {
+        const r = await fetch('/api/missing-templates', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: selectedId, content: code.value }),
+        });
+        if (r.ok) missing = (await r.json()).missing || [];
+    } catch { /* ignore */ }
+    for (const name of missing) {
+        await fetch('/api/add-template', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: selectedId, name }),
+        });
+    }
+    await reloadFiles(currentFilePath, currentFileLang);
+    lastTextKey = '';
     renderPreview();
 }
 
@@ -909,10 +1087,13 @@ async function renderLineImagePreview() {
     }
     if (seq !== previewSeq) return;
     if (resolved) {
-        el('line-image').src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(resolved.file)}?source=image${langQ}`;
+        const src = `/api/image/${idPathFor(selectedId)}/${encodeURIComponent(resolved.file)}?source=image${langQ}`;
+        el('preview-empty').classList.add('hidden');
         el('line-image-stage').classList.remove('hidden');
+        if (src !== lastLineImg) { el('line-image').src = src; lastLineImg = src; } // skip if unchanged (no blink)
         el('preview-note').textContent = resolved.cardId;
     } else {
+        lastLineImg = '';
         el('line-image').removeAttribute('src');
         showPreviewMessage(candidates.length ? `No image for “${candidates[0]}”` : 'No card on this line');
     }
@@ -928,26 +1109,45 @@ async function renderTextCardPreview() {
     const d = await res.json().catch(() => ({}));
     if (seq !== previewSeq) return;
     if (!res.ok || !d.cardId || !d.template) {
+        lastTextKey = '';
         showPreviewMessage(d && d.error === 'parse'
             ? 'Fix the JSON5 to preview a card'
             : 'Place the cursor inside a card block to preview it');
+        return;
+    }
+    // Same card already rendered (cursor moved within the same block) — leave it
+    // alone so the preview doesn't blink.
+    const key = `${d.cardId}|${d.template}|${JSON.stringify(d.values || {})}`;
+    if (key === lastTextKey && !el('card-stage').classList.contains('hidden')) {
+        el('preview-note').textContent = `card: ${d.cardId} · ${d.template}`;
         return;
     }
     const templatePath = 'design/' + d.template;
     const tr = await fetch(`/api/file?id=${encodeURIComponent(selectedId)}&path=${encodeURIComponent(templatePath)}&lang=`);
     if (seq !== previewSeq) return;
     if (!tr.ok) {
-        showPreviewMessage(`Template not found: ${templatePath}`, {
-            label: 'Add Missing Template',
-            onClick: () => addMissingTemplate(d.template),
-        });
+        lastTextKey = '';
+        const actions = [{ label: 'Add Missing Template', onClick: () => addMissingTemplate(d.template) }];
+        try {
+            const mr = await fetch('/api/missing-templates', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: selectedId, content: code.value }),
+            });
+            if (mr.ok && ((await mr.json()).missing || []).length > 1) {
+                actions.push({ label: 'Add All Missing Templates', onClick: addAllMissingTemplates });
+            }
+        } catch { /* ignore */ }
+        if (seq !== previewSeq) return;
+        showPreviewMessage(`Template not found: ${templatePath}`, actions);
         return;
     }
     const html = (await tr.json()).content;
     if (seq !== previewSeq) return;
+    el('preview-empty').classList.add('hidden');
     el('card-stage').classList.remove('hidden');
     el('card-preview').srcdoc = injectBase(substituteValues(html, { id: d.cardId, ...(d.values || {}) }));
     el('preview-note').textContent = `card: ${d.cardId} · ${d.template}`;
+    lastTextKey = key;
     fitPreview();
 }
 
@@ -1025,9 +1225,18 @@ function fitPreview() {
 }
 window.addEventListener('resize', fitPreview);
 
+// For the contextual json5 previews, re-render in place (no hideAllPreviews) so the
+// card/image preview doesn't blank-then-redraw on every change.
+function rerunContextualPreview() {
+    if (currentJson5Mode === 'text') renderTextCardPreview();
+    else if (currentJson5Mode === 'cards') renderLineImagePreview();
+}
 function schedulePreview() {
     clearTimeout(previewTimer);
-    previewTimer = setTimeout(renderPreview, 250);
+    previewTimer = setTimeout(() => {
+        if (currentKind === 'json5' && currentJson5Mode) rerunContextualPreview();
+        else renderPreview();
+    }, 250);
 }
 
 // Re-run the contextual json5 previews when the cursor moves to a different line.
@@ -1037,7 +1246,7 @@ function scheduleCursorPreview() {
     if (ln === lastCursorLine) return;
     lastCursorLine = ln;
     clearTimeout(cursorTimer);
-    cursorTimer = setTimeout(renderPreview, 120);
+    cursorTimer = setTimeout(rerunContextualPreview, 120);
 }
 
 // --- Add project ---
@@ -1214,11 +1423,24 @@ el('ov-preview-images-btn').onclick = () => previewImages('image');
 el('ov-preview-template-btn').onclick = () => previewImages('template');
 el('image-grid-close').onclick = closeImageGrid;
 el('image-detail-close').onclick = closeImageDetail;
-el('act-open-dist').onclick = () => { if (selectedId) fetch(`/api/open-dist?id=${encodeURIComponent(selectedId)}`); };
+el('act-open-dist').onclick = () => {
+    if (selectedId) fetch(`/api/open-dist?id=${encodeURIComponent(selectedId)}&sub=${encodeURIComponent(currentActionOutput)}&lang=${encodeURIComponent(currentLang)}`);
+};
+el('delete-output-btn').onclick = async () => {
+    if (!selectedId) return;
+    const folder = `_dist/${currentProject.name}${currentLang ? '.' + currentLang : ''}/${currentActionOutput ? currentActionOutput + '/' : ''}`;
+    if (!window.confirm(`Delete the output folder?\n${folder}\nThis cannot be undone.`)) return;
+    const r = await fetch('/api/delete-output', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId, sub: currentActionOutput, lang: currentLang }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); openAlert('Delete output', d.error || 'Could not delete.'); }
+};
 el('act-back').onclick = () => { refreshOverview(); setView('project'); };
 el('run-btn').onclick = startRun;
 el('close-editor-btn').onclick = closeEditor;
 el('save-btn').onclick = saveFile;
+el('bump-btn').onclick = bumpVersion;
 
 el('file-select').addEventListener('change', async () => {
     const v = el('file-select').value;
