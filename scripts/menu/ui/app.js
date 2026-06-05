@@ -1592,7 +1592,6 @@ function escapeHtml(s) {
 // --- Wire up ---
 el('card-select').onchange = () => { selectedCardId = el('card-select').value; renderPreview(); };
 el('settings-btn').onclick = async () => { if (await guardUnsaved()) openSettings(); };
-el('settings-browse-btn').onclick = pickFolder;
 el('settings-save-btn').onclick = saveSettings;
 el('line-src-image').onclick = () => { lineSource = 'image'; renderLineImagePreview(); };
 el('line-src-template').onclick = () => { lineSource = 'template'; renderLineImagePreview(); };
