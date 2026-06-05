@@ -57,14 +57,14 @@ const MENU_OPTIONS = [
     {
         label: 'Generate rules HTML',
         group: 'Rules',
-        output: '',
+        output: 'rules_html',
         script: path.join(GENERATE_DIR, 'generate_html.mjs'),
         description: "Renders the project's rules markdown into a styled, standalone HTML file in _dist, using GitHub markdown style.",
     },
     {
         label: 'Generate rules PDF',
         group: 'Rules',
-        output: '',
+        output: 'rules_pdf',
         script: path.join(PROJECT_ROOT, 'generate_rules_pdf.js'),
         description: 'Generates a PDF of the rules.',
     },
@@ -185,13 +185,23 @@ async function writeConfigValue(key, value) {
 
 // Create config.ini if it doesn't exist yet (migrating a legacy image_path.txt
 // into it when present), so the project always has a config file to grow.
+// Create config.ini if missing, and migrate older config.ini files by adding any
+// options they don't have yet (a legacy image_path.txt is folded in via readConfigMap).
+const CONFIG_DEFAULTS = {
+    'paths.images': '',
+    'languages.da': 'dansk',
+    'languages.en': 'english',
+    'editor.indent': '2',
+};
 async function ensureConfig() {
-    if (existsSync(CONFIG_FILE)) return;
     const map = await readConfigMap();
-    if (!('paths.images' in map)) map['paths.images'] = '';
-    if (!('languages.da' in map)) map['languages.da'] = 'dansk';
-    if (!('languages.en' in map)) map['languages.en'] = 'english';
-    try { await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8'); } catch { /* read-only fs */ }
+    let changed = !existsSync(CONFIG_FILE);
+    for (const [k, v] of Object.entries(CONFIG_DEFAULTS)) {
+        if (!(k in map)) { map[k] = v; changed = true; }
+    }
+    if (changed) {
+        try { await fs.writeFile(CONFIG_FILE, serializeIni(map), 'utf-8'); } catch { /* read-only fs */ }
+    }
 }
 
 // Map of language code -> display name from config.ini ([languages] da = dansk, ...).
@@ -558,9 +568,11 @@ async function projectOverview(project, lang = '') {
     }
 
     // Available languages: the base ("Default") plus any .xx variant folders,
-    // labelled from config.ini ([languages] da = dansk, ...) when available.
+    // labelled from config.ini ([languages] da = dansk, ...) when available. The
+    // Default label always comes from the BASE info, regardless of selected language.
     const langNames = await readLanguageNames();
-    const languages = [{ code: '', label: (info && info.language) || 'Default' }]
+    const baseInfo = useVariant ? await readInfoJson5(project.folderDir) : info;
+    const languages = [{ code: '', label: (baseInfo && baseInfo.language) || 'Default' }]
         .concat(variants.map(v => ({ code: v.lang, label: langNames[v.lang] || v.lang })));
 
     const showAssets = !(project.status === '1_idea' || project.status === '2_draft');
@@ -1085,12 +1097,15 @@ const server = http.createServer(async (req, res) => {
         if (pathname === '/api/config' && req.method === 'GET') {
             const image = await readImagePath();
             IMAGE_PATH = image.path;
+            const cfgMap = await readConfigMap();
+            const editorIndent = Math.max(1, Math.min(8, Number(cfgMap['editor.indent']) || 2));
             return sendJson(res, 200, {
                 imagePath: image.path,
                 imagePathValid: image.valid,
                 actions: MENU_OPTIONS.map((o, i) => ({ index: i, label: o.label, description: o.description || '', group: o.group || 'Other', hasImageAlt: !!o.imageScript, output: o.output || '' })),
                 statusFolders: STATUS_FOLDERS.map(f => ({ ...f, canGenerate: GENERATE_FOLDERS.has(f.key) })),
                 languageNames: await readLanguageNames(),
+                editorIndent,
             });
         }
 
@@ -1386,6 +1401,34 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, { ok: true, path: body.path, mtimeMs });
         }
 
+        // Rename a project file (within its folder/variant).
+        if (pathname === '/api/rename-file' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const abs = resolveProjectFile(project, (body.path || '').trim(), body.lang || '');
+            if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
+            // Keep the file in the same (sub)folder; only the basename changes.
+            const dirRel = path.dirname((body.path || '').trim());
+            const newRel = (dirRel === '.' ? '' : dirRel + '/') + (body.newName || '').trim();
+            const newAbs = resolveProjectFile(project, newRel, body.lang || '');
+            if (!newAbs) return sendJson(res, 400, { error: 'Invalid new filename.' });
+            if (existsSync(newAbs)) return sendJson(res, 409, { error: 'A file with that name already exists.' });
+            await fs.rename(abs, newAbs);
+            return sendJson(res, 200, { ok: true, path: newRel });
+        }
+
+        // Delete a project file.
+        if (pathname === '/api/delete-file' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project) return sendJson(res, 400, { error: 'Invalid project.' });
+            const abs = resolveProjectFile(project, (body.path || '').trim(), body.lang || '');
+            if (!abs) return sendJson(res, 400, { error: 'Invalid file path.' });
+            try { await fs.unlink(abs); } catch { return sendJson(res, 404, { error: 'File not found.' }); }
+            return sendJson(res, 200, { ok: true });
+        }
+
         // List card templates referenced in the posted .cards.text content that are
         // missing from the project's design/ folder (for "Add All Missing Templates").
         if (pathname === '/api/missing-templates' && req.method === 'POST') {
@@ -1490,19 +1533,17 @@ const server = http.createServer(async (req, res) => {
             const optionIndex = Number(url.searchParams.get('option'));
             const option = MENU_OPTIONS[optionIndex];
             const useJpgs = url.searchParams.get('source') === 'jpgs' && !!(option && option.imageScript);
-            // Rendering from pre-made template JPGs reads from _dist, so it doesn't
-            // need the master image folder; every other run does.
-            if (!useJpgs) {
-                const image = await readImagePath();
-                if (!image.valid) {
-                    res.writeHead(400, { 'Content-Type': 'text/event-stream' });
-                    res.write('event: output\n');
-                    res.write(`data: ${JSON.stringify({ text: 'ERROR: Image path is not set or invalid.\n' })}\n\n`);
-                    res.write('event: done\n');
-                    res.write(`data: ${JSON.stringify({ code: 1 })}\n\n`);
-                    return res.end();
-                }
-                IMAGE_PATH = image.path;
+            // Only the Images generators read from the master image folder. Rules and
+            // Templates generators (and the "use existing JPGs" path) don't need it.
+            const image = await readImagePath();
+            IMAGE_PATH = image.path;
+            if (option && option.group === 'Images' && !useJpgs && !image.valid) {
+                res.writeHead(400, { 'Content-Type': 'text/event-stream' });
+                res.write('event: output\n');
+                res.write(`data: ${JSON.stringify({ text: 'ERROR: Image path is not set or invalid.\n' })}\n\n`);
+                res.write('event: done\n');
+                res.write(`data: ${JSON.stringify({ code: 1 })}\n\n`);
+                return res.end();
             }
             return runScriptSSE(res, { optionIndex, project, useJpgs, lang: url.searchParams.get('lang') || '' });
         }

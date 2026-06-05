@@ -171,6 +171,22 @@ button.ghost {
 
 button.ghost:hover { background: var(--panel-2); color: var(--text); }
 
+/* Danger button (Delete). */
+button.danger { background: var(--red); border-color: var(--red); color: #fff; }
+button.danger:hover { filter: brightness(1.08); }
+
+/* Current filename shown next to the file <select> (no longer an input). */
+.file-name-display {
+    font-family: "Consolas", monospace;
+    font-size: 13px;
+    color: var(--muted);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .console-header {
     display: flex;
     align-items: center;

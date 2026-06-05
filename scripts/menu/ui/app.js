@@ -227,7 +227,7 @@ function renderLanguageSelect(ov) {
     sel.className = 'select';
     ov.languages.forEach((l) => {
         const o = document.createElement('option');
-        o.value = l.code; o.textContent = l.label;
+        o.value = l.code; o.textContent = capitalize(l.label);
         sel.appendChild(o);
     });
     sel.value = currentLang;
@@ -429,10 +429,10 @@ async function startRun() {
 
 function runAction(source) {
     if (currentActionIndex === null || !currentProject || !currentProject.canGenerate) return;
-    // Rendering from existing JPGs reads _dist, so it doesn't need the image folder.
-    if (source !== 'jpgs' && !config.imagePathValid) { openSettings(); return; }
-    if (currentStream) currentStream.close();
     const action = config.actions[currentActionIndex];
+    // Only the Images generators need the master image folder.
+    if (action.group === 'Images' && source !== 'jpgs' && !config.imagePathValid) { openSettings(); return; }
+    if (currentStream) currentStream.close();
 
     consoleEl.textContent = '';
     el('pdf-results').classList.add('hidden');
@@ -729,7 +729,8 @@ function fileLabel(f) {
     if (isOfficialFile(f.path) && f.path.startsWith(name)) return f.path.slice(name.length);
     return f.path;
 }
-function langName(code) { return (config.languageNames && config.languageNames[code]) || code; }
+function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+function langName(code) { return capitalize((config.languageNames && config.languageNames[code]) || code); }
 
 function renderFileSelect() {
     const sel = el('file-select');
@@ -746,11 +747,12 @@ function renderFileSelect() {
         });
         sel.appendChild(og);
     };
-    // Official base files first, then a group per language, then everything else.
+    // Official base files, then Design templates, then a group per language, then the rest.
     addGroup('Files', files.filter(f => !f.lang && isOfficialFile(f.path)));
+    addGroup('Design', files.filter(f => !f.lang && f.group === 'template'));
     [...new Set(files.filter(f => f.lang).map(f => f.lang))]
         .forEach(code => addGroup(langName(code), files.filter(f => f.lang === code)));
-    addGroup('Misc.', files.filter(f => !f.lang && !isOfficialFile(f.path)));
+    addGroup('Misc.', files.filter(f => !f.lang && !isOfficialFile(f.path) && f.group !== 'template'));
     // Idea projects are a single file — no "New file" option.
     if (!currentProject || currentProject.status !== '1_idea') {
         const nw = document.createElement('option');
@@ -785,8 +787,7 @@ async function selectFile(path, lang = '') {
     currentFilePath = path;
     currentFileLang = lang;
     currentFileMtime = data.mtimeMs || 0;
-    el('file-name').value = path;
-    el('file-name').readOnly = true;
+    el('file-name').textContent = path;
     code.value = data.content;
     currentKind = kindFromPath(path);
     currentJson5Mode = json5ModeForPath(path);
@@ -873,30 +874,54 @@ function applyCardValues(html) {
     return substituteValues(html, { id: selectedCardId, ...((card && card.values) || {}) });
 }
 
+// "+ New file" prompts for a filename, then opens an empty (unsaved) buffer.
 function startNewFile() {
-    el('file-select').value = NEW_FILE;
-    currentFilePath = null;
-    currentFileLang = '';
-    el('file-name').value = '';
-    el('file-name').readOnly = false;
-    el('file-name').focus();
-    code.value = '';
-    currentKind = null;
-    currentJson5Mode = null;
-    currentFileMtime = 0;
-    dirty = false;
-    setSaveStatus('');
-    updateBumpButton();
-    renderPreview();
+    const wrap = document.createElement('div');
+    const lbl = document.createElement('p');
+    lbl.className = 'muted';
+    lbl.textContent = 'New file name (e.g. notes.md, design/card.html):';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'name-input modal-input';
+    input.placeholder = 'filename.md';
+    wrap.appendChild(lbl);
+    wrap.appendChild(input);
+    const revert = () => { closeModal(); el('file-select').value = currentFilePath === null ? NEW_FILE : `${currentFileLang || ''}|${currentFilePath}`; };
+    const create = () => {
+        const name = input.value.trim();
+        if (!/\.(md|json5|txt|html|css)$/i.test(name) || name.includes('..')) {
+            setModalError('Filename must end in .md, .json5, .txt, .html or .css'); return;
+        }
+        closeModal();
+        currentFilePath = name;
+        currentFileLang = '';
+        currentFileMtime = 0;
+        el('file-name').textContent = name;
+        el('file-select').value = NEW_FILE;
+        code.value = '';
+        currentKind = kindFromPath(name);
+        currentJson5Mode = json5ModeForPath(name);
+        lastTextKey = ''; lastLineImg = '';
+        dirty = true;
+        setSaveStatus('');
+        updateBumpButton();
+        renderPreview();
+        code.focus();
+    };
+    openModal({ title: 'New file', body: wrap, buttons: [btnGhost('Cancel', revert), btnPrimary('Create', create)] });
+    setTimeout(() => input.focus(), 50);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
 }
 
 // Returns true on success.
 async function saveFile() {
     setEditorError('');
-    const name = el('file-name').value.trim();
-    if (!/\.(md|json5|txt|html|css)$/i.test(name)) {
-        setEditorError('Filename must end in .md, .json5, .txt, .html or .css');
-        return false;
+    const name = currentFilePath;
+    if (!name || !/\.(md|json5|txt|html|css)$/i.test(name)) { setEditorError('No file to save.'); return false; }
+    // Re-indent json5 on save (preserving comments).
+    if (/\.json5$/i.test(name)) {
+        const reindented = reindentJson5(code.value, config.editorIndent || 2);
+        if (reindented != null) code.value = reindented;
     }
     setSaveStatus('saving');
     const res = await fetch('/api/file', {
@@ -908,7 +933,6 @@ async function saveFile() {
     if (!res.ok) { setSaveStatus(''); setEditorError(data.error || 'Save failed.'); return false; }
     setSaveStatus('saved');
     dirty = false;
-    currentFilePath = name;
     currentFileMtime = data.mtimeMs || 0;
     currentKind = kindFromPath(name);
     currentJson5Mode = json5ModeForPath(name);
@@ -927,9 +951,92 @@ async function reloadFiles(selectPath, selectLang = '') {
     renderFileSelect();
     if (selectPath && files.some(f => f.path === selectPath && (f.lang || '') === selectLang)) {
         el('file-select').value = `${selectLang || ''}|${selectPath}`;
-        el('file-name').value = selectPath;
-        el('file-name').readOnly = true;
+        el('file-name').textContent = selectPath;
     }
+}
+
+// --- Rename / Delete the current file ---
+function renameFile() {
+    if (!currentFilePath) return;
+    const wrap = document.createElement('div');
+    const lbl = document.createElement('p');
+    lbl.className = 'muted';
+    lbl.textContent = `Rename ${currentFilePath} to:`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'name-input modal-input';
+    input.value = currentFilePath.split('/').pop();
+    wrap.appendChild(lbl);
+    wrap.appendChild(input);
+    const doRename = async () => {
+        const newName = input.value.trim();
+        if (!/\.(md|json5|txt|html|css)$/i.test(newName) || newName.includes('/') || newName.includes('..')) {
+            setModalError('Enter a simple filename ending in .md, .json5, .txt, .html or .css'); return;
+        }
+        const r = await fetch('/api/rename-file', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: selectedId, path: currentFilePath, lang: currentFileLang, newName }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setModalError(d.error || 'Could not rename.'); return; }
+        closeModal();
+        await reloadFiles(d.path, currentFileLang);
+        selectFile(d.path, currentFileLang);
+    };
+    openModal({ title: 'Rename file', body: wrap, buttons: [btnCancel(), btnPrimary('Rename', doRename)] });
+    setTimeout(() => input.focus(), 50);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doRename(); });
+}
+
+async function deleteFile() {
+    if (!currentFilePath) return;
+    if (!window.confirm(`Delete “${currentFilePath}”?\nThis cannot be undone.`)) return;
+    const r = await fetch('/api/delete-file', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId, path: currentFilePath, lang: currentFileLang }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { openAlert('Delete file', d.error || 'Could not delete.'); return; }
+    dirty = false;
+    await reloadFiles(null, '');
+    const def = files.find(f => f.default) || files[0];
+    if (def) selectFile(def.path, def.lang || '');
+    else startNewFile();
+}
+
+// Re-indent a json5 document by brace/bracket depth (preserves content & comments).
+// Returns the reindented string, or null if structure looks unbalanced (then skip).
+function reindentJson5(text, size) {
+    const unit = ' '.repeat(Math.max(1, size || 2));
+    const lines = text.split('\n');
+    const out = [];
+    let depth = 0, inBlockComment = false;
+    for (let raw of lines) {
+        const line = raw.replace(/\s+$/, '');
+        const trimmed = line.trim();
+        if (inBlockComment) {
+            out.push(line); // leave comment bodies untouched
+            if (trimmed.includes('*/')) inBlockComment = false;
+            continue;
+        }
+        // A line that starts by closing a bracket is indented one level less.
+        const startsClosing = /^[}\]]/.test(trimmed);
+        const indent = Math.max(0, depth - (startsClosing ? 1 : 0));
+        out.push(trimmed ? unit.repeat(indent) + trimmed : '');
+        // Update depth from this line's brackets, ignoring strings and comments.
+        let inStr = null;
+        for (let i = 0; i < trimmed.length; i++) {
+            const c = trimmed[i];
+            if (inStr) { if (c === '\\') i++; else if (c === inStr) inStr = null; continue; }
+            if (c === '"' || c === "'" || c === '`') { inStr = c; continue; }
+            if (c === '/' && trimmed[i + 1] === '/') break; // line comment
+            if (c === '/' && trimmed[i + 1] === '*') { inBlockComment = true; break; }
+            if (c === '{' || c === '[') depth++;
+            else if (c === '}' || c === ']') depth = Math.max(0, depth - 1);
+        }
+    }
+    if (depth !== 0) return null; // unbalanced — don't risk mangling
+    return out.join('\n');
 }
 
 // --- CSS preview base: first HTML template that imports this CSS ---
@@ -999,6 +1106,7 @@ function hideAllPreviews() {
     el('line-image-stage').classList.add('hidden');
     el('preview-empty').classList.add('hidden');
     el('card-preview-bar').classList.add('hidden');
+    el('edit-template-btn').classList.add('hidden');
     el('preview-note').textContent = '';
 }
 
@@ -1148,6 +1256,13 @@ async function renderTextCardPreview() {
     el('card-preview').srcdoc = injectBase(substituteValues(html, { id: d.cardId, ...(d.values || {}) }));
     el('preview-note').textContent = `card: ${d.cardId} · ${d.template}`;
     lastTextKey = key;
+    // Edit Template: jump to the template file in the editor.
+    el('card-preview-bar').classList.remove('hidden');
+    el('card-select-label').classList.add('hidden');
+    el('card-select').classList.add('hidden');
+    const editBtn = el('edit-template-btn');
+    editBtn.classList.remove('hidden');
+    editBtn.onclick = () => selectFile(templatePath, '');
     fitPreview();
 }
 
@@ -1191,8 +1306,16 @@ function injectLiveCss(html, css) {
     return style + html;
 }
 
+// Show the card <select> in the preview bar (html/css modes), hide Edit Template.
+function showCardSelectBar() {
+    el('card-select-label').classList.remove('hidden');
+    el('card-select').classList.remove('hidden');
+    el('edit-template-btn').classList.add('hidden');
+}
+
 function renderCardPreview(html) {
-    cardHtmlBase = { name: el('file-name').value, content: html, path: currentFilePath, lang: currentFileLang };
+    cardHtmlBase = { name: currentFilePath, content: html, path: currentFilePath, lang: currentFileLang };
+    showCardSelectBar();
     el('card-preview-bar').classList.toggle('hidden', templateCards.length === 0);
     el('card-stage').classList.remove('hidden');
     el('card-preview').srcdoc = injectBase(applyCardValues(html));
@@ -1200,6 +1323,7 @@ function renderCardPreview(html) {
 }
 
 function renderCssPreview() {
+    showCardSelectBar();
     el('card-preview-bar').classList.toggle('hidden', templateCards.length === 0);
     if (!templateCards.length) { showPreviewMessage('No HTML template imports this CSS.'); return; }
     const card = templateCards.find(c => c.id === selectedCardId) || templateCards[0];
@@ -1339,7 +1463,7 @@ function guardUnsaved() {
         if (!(currentView === 'editor' && dirty)) return resolve(true);
         openModal({
             title: 'Unsaved changes',
-            body: `<p>Save changes to “${escapeHtml(el('file-name').value || 'this file')}” before closing?</p>`,
+            body: `<p>Save changes to “${escapeHtml(currentFilePath || 'this file')}” before closing?</p>`,
             onDismiss: () => resolve(false),
             buttons: [
                 btnGhost('Cancel', () => { closeModal(); resolve(false); }),
@@ -1441,6 +1565,8 @@ el('run-btn').onclick = startRun;
 el('close-editor-btn').onclick = closeEditor;
 el('save-btn').onclick = saveFile;
 el('bump-btn').onclick = bumpVersion;
+el('rename-btn').onclick = renameFile;
+el('delete-file-btn').onclick = deleteFile;
 
 el('file-select').addEventListener('change', async () => {
     const v = el('file-select').value;
@@ -1465,9 +1591,10 @@ el('md-preview').addEventListener('load', syncMdScroll);
 code.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
         e.preventDefault();
+        const indent = ' '.repeat(config.editorIndent || 2);
         const s = code.selectionStart, en = code.selectionEnd;
-        code.value = code.value.slice(0, s) + '    ' + code.value.slice(en);
-        code.selectionStart = code.selectionEnd = s + 4;
+        code.value = code.value.slice(0, s) + indent + code.value.slice(en);
+        code.selectionStart = code.selectionEnd = s + indent.length;
         dirty = true;
         setSaveStatus('');
         schedulePreview();

@@ -2,16 +2,16 @@
 
 ## 5 June 2026
 
-- Indent json5 correctly on save. Add a indentation config value, and set it to 2 spaces. (also use that setting when pressing tab)
-- When previewing a template (when editing .cards.text), add a button in the preview: Edit Template. This opens the template file in the editor file list.
-- Promote button should be black, not blue. Blue draws too much attention, and it is a rare action.
-- Preview Template Images should also be blue (Like preview images)
-- When selecting a non-default language, the language <select> element changes the default language to "Default", even when .info has a non-empty string in the language property.
-- Languages in select menus should be Capitalized.
-- Generating rules should create a rules_html/rules_pdf folder under the _dist/<project> folder.
-- In the editor, add a Design optgroup that has the design files. This optgroup should be the second, after the main one.
-- Optgroup titles should be Capitalized.
-- In the editor, instead of having a input for the filename string (which is rarely changed), add a Rename button (black background, as with Bump). Also add a Delete button (with red background) that deletes a file (after a window.confirm). Use a Trashcan icon for Delete, to save horizontal space, and put it last.
+- ~~Indent json5 correctly on save. Add a indentation config value, and set it to 2 spaces. (also use that setting when pressing tab)~~
+- ~~When previewing a template (when editing .cards.text), add a button in the preview: Edit Template. This opens the template file in the editor file list.~~
+- ~~Promote button should be black, not blue. Blue draws too much attention, and it is a rare action.~~
+- ~~Preview Template Images should also be blue (Like preview images)~~
+- ~~When selecting a non-default language, the language <select> element changes the default language to "Default", even when .info has a non-empty string in the language property.~~
+- ~~Languages in select menus should be Capitalized.~~
+- ~~Generating rules should create a rules_html/rules_pdf folder under the _dist/<project> folder.~~
+- ~~In the editor, add a Design optgroup that has the design files. This optgroup should be the second, after the main one.~~
+- ~~Optgroup titles should be Capitalized.~~
+- ~~In the editor, instead of having a input for the filename string (which is rarely changed), add a Rename button (black background, as with Bump). Also add a Delete button (with red background) that deletes a file (after a window.confirm). Use a Trashcan icon for Delete, to save horizontal space, and put it last.~~
 
 - ~~After clicking "Add Missing Template", the new file is not added to the file select element.~~
 - ~~If an external program alters a file already being edited and no changes has been made, update the current file being edited to the file on disk.~~

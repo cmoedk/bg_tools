@@ -33,7 +33,7 @@
                         <span id="ov-name" class="project-name"></span>
                     </div>
                     <div class="view-head-actions">
-                        <button id="ov-promote-btn">▲ Promote</button>
+                        <button id="ov-promote-btn" class="ghost">▲ Promote</button>
                         <button id="ov-archive-btn" class="ghost">🗄 Archive</button>
                     </div>
                 </div>
@@ -43,7 +43,7 @@
                 <div id="ov-batches" class="batch-table hidden"></div>
                 <div class="ov-actions">
                     <button id="ov-preview-images-btn" class="hidden">🖼 Preview Images</button>
-                    <button id="ov-preview-template-btn" class="ghost hidden">🖼 Preview Template Images</button>
+                    <button id="ov-preview-template-btn" class="hidden">🖼 Preview Template Images</button>
                 </div>
             </div>
 
@@ -82,10 +82,12 @@
                 </div>
                 <div class="editor-toolbar">
                     <select id="file-select" class="select" title="Project files"></select>
-                    <input id="file-name" type="text" class="name-input" placeholder="filename.md" autocomplete="off">
+                    <span id="file-name" class="file-name-display"></span>
                     <button id="save-btn">Save</button>
                     <button id="bump-btn" class="ghost hidden">Bump version</button>
+                    <button id="rename-btn" class="ghost">Rename</button>
                     <span id="save-status" class="badge"></span>
+                    <button id="delete-file-btn" class="danger" title="Delete file">🗑</button>
                 </div>
                 <textarea id="code" class="code-area" spellcheck="false" placeholder="Select a file…"></textarea>
                 <div id="editor-error" class="error"></div>
@@ -120,8 +122,9 @@
                     <span id="preview-note" class="muted preview-base"></span>
                 </div>
                 <div id="card-preview-bar" class="card-preview-bar hidden">
-                    <label for="card-select">Card:</label>
+                    <label id="card-select-label" for="card-select">Card:</label>
                     <select id="card-select" class="select"></select>
+                    <button id="edit-template-btn" class="ghost hidden">Edit Template</button>
                 </div>
                 <div id="preview-host" class="preview-host">
                     <iframe id="md-preview" class="md-preview-frame hidden" sandbox="allow-same-origin"></iframe>

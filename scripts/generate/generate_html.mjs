@@ -3,7 +3,7 @@
  *
  * Finds the project's rules markdown (the first *.md whose name contains
  * "rules") and renders it into a styled, standalone HTML file at
- * _dist/<gameName>/<gameName>.html using the shared markdown pipeline.
+ * _dist/<gameName>/rules_html/<gameName>.html using the shared markdown pipeline.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +12,7 @@ import { parseGeneratorArgs } from './shared.mjs';
 
 const { gameFolder, gameName } = parseGeneratorArgs();
 
-const distGameFolder = path.join('./_dist', gameName);
+const distGameFolder = path.join('./_dist', gameName, 'rules_html');
 fs.mkdirSync(distGameFolder, { recursive: true });
 
 const files = fs.readdirSync(gameFolder);
