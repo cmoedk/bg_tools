@@ -2,6 +2,9 @@
 
 ## 5 June 2026
 
+- "Saved" info, after pressing Save, should appear next to the project name, f.ex. the_king_of_ragnarok. And instead of a button like look, style it without background-color, but with a green text color.
+- If the current file has been edited, but not saved, add an asterisk next to the project title (f.ex. the_king_of_ragnarok*)
+
 - ~~Move the X (close editor) into the editor header (at the end of the Editor header line)~~
 - ~~The Images/Templates buttons toggle should be centered in the preview pane.~~
 - ~~Print and play pdf from images should save to pnp_pdf_img. Print and play pdf from templates should save to pnp_pdf_tpl. Same with tts_img/tts_tpl/bgm_img/bgm_tpl.~~
