@@ -15,10 +15,11 @@ import { chunkArray, createDistFolders, emptyFolder, getImageInfos, parseGenerat
 const TTS_MAX_ROW_SIZE = 10;
 const TTS_MAX_COL_SIZE = 7;
 
-const { gameFolder, gameName, imageFolderPath } = parseGeneratorArgs();
-const distFolder = path.join(DIST_DIR, gameName, TTS_SUBFOLDER);
+const { gameFolder, gameName, imageFolderPath, outputSubfolder } = parseGeneratorArgs();
+const outFolder = outputSubfolder || TTS_SUBFOLDER;
+const distFolder = path.join(DIST_DIR, gameName, outFolder);
 
-createDistFolders(gameName, TTS_SUBFOLDER);
+createDistFolders(gameName, outFolder);
 
 (async () => {
     console.time('Reading files.');

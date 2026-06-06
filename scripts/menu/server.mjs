@@ -71,28 +71,28 @@ const MENU_OPTIONS = [
     {
         label: 'Generate Print-and-Play PDF',
         group: 'Images',
-        output: 'pnp_pdf',
+        output: 'pnp_pdf_img',
         script: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs'),
         description: 'Builds a print-and-play PDF laid out from the card images in the master image folder.',
     },
     {
         label: 'Generate Tabletop Simulator Files',
         group: 'Images',
-        output: 'tts',
+        output: 'tts_img',
         script: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
         description: 'Packs the card images into Tabletop Simulator deck sheets. Each filename encodes the card count, rows and columns, for import into the Tabletop Simulator application.',
     },
     {
         label: 'Generate Boardgamemakers.com files',
         group: 'Images',
-        output: 'bgm',
+        output: 'bgm_img',
         script: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
         description: 'Writes each card front/back image for boardgamemakers.com. Each image is slightly altered (~10% of its pixels nudged ±1% in brightness) so identical cards get unique file content for bulk upload.',
     },
     {
         label: 'Generate Print-and-Play PDF',
         group: 'Templates',
-        output: 'test',
+        output: 'pnp_pdf_tpl',
         script: path.join(GENERATE_DIR, 'generate_template_pnp_pdf.mjs'),
         imageScript: path.join(GENERATE_DIR, 'generate_pnp_pdf.mjs'),
         description: 'Renders each card from its HTML template (in design/) and assembles a print-and-play PDF.',
@@ -107,7 +107,7 @@ const MENU_OPTIONS = [
     {
         label: 'Generate Tabletop Simulator Files',
         group: 'Templates',
-        output: 'tts',
+        output: 'tts_tpl',
         script: path.join(GENERATE_DIR, 'generate_template_tts_files.mjs'),
         imageScript: path.join(GENERATE_DIR, 'generate_tts_files.mjs'),
         description: 'Renders each card from its HTML template (in design/) and packs them into Tabletop Simulator deck sheets. Each filename encodes the card count, rows and columns, for the Tabletop Simulator application.',
@@ -115,7 +115,7 @@ const MENU_OPTIONS = [
     {
         label: 'Generate Boardgamemakers.com files',
         group: 'Templates',
-        output: 'bgm',
+        output: 'bgm_tpl',
         script: path.join(GENERATE_DIR, 'generate_template_bgm_files.mjs'),
         imageScript: path.join(GENERATE_DIR, 'generate_bgm_files.mjs'),
         description: 'Renders each card from its HTML template (in design/) and writes card front/back files for boardgamemakers.com. Each image is slightly altered (~10% of its pixels nudged ±1% in brightness) so identical cards get unique content for bulk upload.',
@@ -1048,9 +1048,9 @@ async function runScriptSSE(res, { optionIndex, project, useJpgs, lang }) {
     // rendered from templates (in _dist/<project>/template_jpg) instead of
     // re-rendering from the HTML templates.
     const script = useJpgs && option.imageScript ? option.imageScript : option.script;
-    const extraArgs = useJpgs && option.imageScript
-        ? [path.resolve(DIST_DIR, gameName, 'template_jpg')]
-        : [];
+    // arg 5: read card images from here (the template JPGs, when reusing them);
+    // arg 6: write output into this _dist subfolder (per-source: pnp_pdf_img, etc.).
+    const imageOverride = useJpgs && option.imageScript ? path.resolve(DIST_DIR, gameName, 'template_jpg') : '';
     if (!existsSync(script)) {
         sse('output', { text: `ERROR: Script not found:\n${script}\n` });
         sse('done', { code: 1 });
@@ -1061,7 +1061,7 @@ async function runScriptSSE(res, { optionIndex, project, useJpgs, lang }) {
 
     const pdfsBefore = await scanPdfs();
 
-    const child = spawn('node', [script, IMAGE_PATH, relPath, gameName, ...extraArgs], {
+    const child = spawn('node', [script, IMAGE_PATH, relPath, gameName, imageOverride, option.output || ''], {
         cwd: PROJECT_ROOT,
         env: process.env,
     });
@@ -1168,10 +1168,13 @@ const server = http.createServer(async (req, res) => {
             if (process.platform !== 'win32') {
                 return sendJson(res, 400, { error: 'The folder picker is only available on Windows.' });
             }
+            // A hidden TopMost owner form makes the dialog appear IN FRONT of the
+            // browser instead of behind it.
             const ps = "Add-Type -AssemblyName System.Windows.Forms; " +
+                "$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; " +
                 "$d = New-Object System.Windows.Forms.FolderBrowserDialog; " +
-                "$d.Description = 'Choose the master image folder'; $d.ShowNewFolderButton = $true; " +
-                "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($d.SelectedPath) }";
+                "$d.Description = 'Choose a folder'; $d.ShowNewFolderButton = $true; " +
+                "if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($d.SelectedPath) }; $owner.Dispose()";
             const child = spawn('powershell', ['-NoProfile', '-STA', '-Command', ps]);
             let out = '';
             child.stdout.on('data', (d) => { out += d.toString(); });

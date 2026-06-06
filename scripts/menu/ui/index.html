@@ -18,7 +18,10 @@
 
         <!-- MIDDLE: project view / action view / editor / settings (one at a time) -->
         <section id="editor" class="pane editor-pane">
-            <div id="mid-header" class="pane-header"></div>
+            <div id="mid-header" class="pane-header">
+                <span id="mid-header-title"></span>
+                <button id="close-editor-btn" class="ghost hidden" title="Close Editor">✕</button>
+            </div>
             <div id="mid-empty" class="pane-empty">
                 <p>Select a project on the left, or add one with <strong>+ Add</strong>.</p>
             </div>
@@ -37,6 +40,7 @@
                 </div>
                 <div id="ov-lang" class="ov-lang hidden"></div>
                 <div id="ov-info" class="ov-info"></div>
+                <hr id="ov-info-hr" class="ov-hr hidden">
                 <dl id="ov-details" class="details"></dl>
                 <div id="ov-batches" class="batch-table hidden"></div>
                 <div class="ov-actions">
@@ -76,7 +80,6 @@
                         <span id="ed-status" class="status-chip"></span>
                         <span id="ed-name" class="project-name"></span>
                     </div>
-                    <button id="close-editor-btn" class="ghost" title="Close Editor">✕</button>
                 </div>
                 <div class="editor-toolbar">
                     <select id="file-select" class="select" title="Project files"></select>

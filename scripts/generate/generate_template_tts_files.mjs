@@ -17,8 +17,9 @@ import { renderTemplateCards } from './templateRenderer.mjs';
 const TTS_MAX_ROW_SIZE = 10;
 const TTS_MAX_COL_SIZE = 7;
 
-const { gameFolder, gameName, imageFolderPath } = parseGeneratorArgs();
-const distFolder = path.join(DIST_DIR, gameName, TTS_SUBFOLDER);
+const { gameFolder, gameName, imageFolderPath, outputSubfolder } = parseGeneratorArgs();
+const outFolder = outputSubfolder || TTS_SUBFOLDER;
+const distFolder = path.join(DIST_DIR, gameName, outFolder);
 
 (async () => {
     const imageTexts = await getImageTexts(gameFolder);
@@ -27,7 +28,7 @@ const distFolder = path.join(DIST_DIR, gameName, TTS_SUBFOLDER);
         process.exit(1);
     }
 
-    await createDistFolders(gameName, TTS_SUBFOLDER);
+    await createDistFolders(gameName, outFolder);
     await emptyFolder(distFolder);
 
     const imageInfos = await getImageInfos(gameFolder, imageFolderPath, true);

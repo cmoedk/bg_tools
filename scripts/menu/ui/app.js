@@ -99,9 +99,10 @@ function setView(v) {
     el('right-actions').classList.toggle('hidden', !(v === 'project' || v === 'action'));
     el('right-preview').classList.toggle('hidden', v !== 'editor');
     el('workspace').classList.toggle('editor-mode', v === 'editor');
-    el('mid-header').textContent =
+    el('mid-header-title').textContent =
         v === 'editor' ? 'Editor' : v === 'settings' ? 'Settings' :
         v === 'action' ? 'Action' : v === 'project' ? 'Overview' : '';
+    el('close-editor-btn').classList.toggle('hidden', v !== 'editor');
     saveLocation();
 }
 
@@ -207,6 +208,8 @@ async function selectProject(id) {
     renderOverview(ov); // sets currentProject (incl. asset flags) + renders the action list
     setView('project');
     saveLocation();
+    // Idea projects are a single file — jump straight into editing it.
+    if (ov.status === '1_idea') openEditor();
 }
 
 async function fetchOverview() {
@@ -243,6 +246,7 @@ function renderLanguageSelect(ov) {
 function renderInfo(info) {
     const host = el('ov-info');
     host.innerHTML = '';
+    el('ov-info-hr').classList.toggle('hidden', !(info && (info.oneLiner || info.description || info.playerCount || info.ages || info.duration || info.language)));
     if (!info) return;
     if (info.oneLiner) { const p = document.createElement('p'); p.className = 'ov-oneliner'; p.textContent = info.oneLiner; host.appendChild(p); }
     if (info.description) { const p = document.createElement('p'); p.className = 'ov-desc'; p.textContent = info.description; host.appendChild(p); }
@@ -754,6 +758,7 @@ async function openEditor() {
 
 async function closeEditor() {
     if (!(await guardUnsaved())) return;
+    await refreshOverview(); // pick up edits (e.g. to the .info file)
     setView('project');
 }
 

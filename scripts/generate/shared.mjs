@@ -14,21 +14,24 @@ import { DEFAULT_BACK_FILENAME_APPEND, DEFAULT_CARD_MM_HEIGHT, DEFAULT_CARD_MM_W
  *   node <script> <masterImagePath> <gameFolder> <gameName>
  *
  * @returns {{
- *   masterImagePath: string,  // absolute path to the master image folder (chosen in the menu)
- *   gameFolder: string,       // project folder relative to the repo root, e.g. "5_prototype/the_king_of_ragnarok"
- *   gameName: string,         // the folder name, also the per-game subfolder inside the master image folder
- *   imageFolderPath: string,  // masterImagePath + "/" + gameName: where this game's card images live
+ *   masterImagePath: string,   // absolute path to the master image folder (chosen in the menu)
+ *   gameFolder: string,        // project folder relative to the repo root, e.g. "5_prototype/the_king_of_ragnarok"
+ *   gameName: string,          // the folder name, also the per-game subfolder inside the master image folder
+ *   imageFolderPath: string,   // masterImagePath + "/" + gameName: where this game's card images live
+ *   outputSubfolder: string,   // optional _dist output subfolder override (per-source, e.g. "tts_tpl")
  * }}
  */
 export function parseGeneratorArgs() {
-    const [, , masterImagePath, gameFolder, gameName, imageFolderOverride] = process.argv;
+    const [, , masterImagePath, gameFolder, gameName, imageFolderOverride, outputSubfolder] = process.argv;
     return {
         masterImagePath,
         gameFolder,
         gameName,
-        // An explicit 4th argument overrides where card images are read from (used to
-        // feed the image generators with the JPGs rendered from templates).
+        // arg 5 overrides where card images are read from (used to feed the image
+        // generators with the JPGs rendered from templates).
         imageFolderPath: imageFolderOverride || `${masterImagePath}/${gameName}`,
+        // arg 6 overrides the _dist output subfolder (per-source: pnp_pdf_img, tts_tpl, ...).
+        outputSubfolder: outputSubfolder || '',
     };
 }
 

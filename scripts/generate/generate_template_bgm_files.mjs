@@ -14,9 +14,11 @@ import { createDistFolders, emptyFolder, getImageInfos, getImageTexts, parseGene
 import { renderTemplateCards } from './templateRenderer.mjs';
 import { BGM_SUBFOLDER_BACKS, BGM_SUBFOLDER_FRONTS, DIST_DIR, IMG_EXT } from './config.mjs';
 
-const { gameFolder, gameName, imageFolderPath } = parseGeneratorArgs();
-const frontsFolder = path.join(DIST_DIR, gameName, BGM_SUBFOLDER_FRONTS);
-const backsFolder = path.join(DIST_DIR, gameName, BGM_SUBFOLDER_BACKS);
+const { gameFolder, gameName, imageFolderPath, outputSubfolder } = parseGeneratorArgs();
+const frontsSub = outputSubfolder ? `${outputSubfolder}/fronts` : BGM_SUBFOLDER_FRONTS;
+const backsSub = outputSubfolder ? `${outputSubfolder}/backs` : BGM_SUBFOLDER_BACKS;
+const frontsFolder = path.join(DIST_DIR, gameName, frontsSub);
+const backsFolder = path.join(DIST_DIR, gameName, backsSub);
 
 (async () => {
     const imageTexts = await getImageTexts(gameFolder);
@@ -25,8 +27,8 @@ const backsFolder = path.join(DIST_DIR, gameName, BGM_SUBFOLDER_BACKS);
         process.exit(1);
     }
 
-    await createDistFolders(gameName, BGM_SUBFOLDER_FRONTS);
-    await createDistFolders(gameName, BGM_SUBFOLDER_BACKS);
+    await createDistFolders(gameName, frontsSub);
+    await createDistFolders(gameName, backsSub);
     await emptyFolder(frontsFolder);
     await emptyFolder(backsFolder);
 
@@ -44,7 +46,7 @@ const backsFolder = path.join(DIST_DIR, gameName, BGM_SUBFOLDER_BACKS);
         }
         count += 1;
     }
-    console.log(`\nWrote boardgamemakers.com files to ${path.join(DIST_DIR, gameName, 'bgm')}`);
+    console.log(`\nWrote boardgamemakers.com files to ${path.join(DIST_DIR, gameName, outputSubfolder || 'bgm')}`);
 })();
 
 /**

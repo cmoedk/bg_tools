@@ -11,9 +11,10 @@ import { buildPnpPdf } from './pdfBuilder.mjs';
 import { createDistFolders, getImageInfos, getImageTexts, parseGeneratorArgs } from './shared.mjs';
 import { renderTemplateCards } from './templateRenderer.mjs';
 
-const { gameFolder, gameName, imageFolderPath } = parseGeneratorArgs();
+const { gameFolder, gameName, imageFolderPath, outputSubfolder } = parseGeneratorArgs();
+const outFolder = outputSubfolder || TEST_PNP_PDF_SUBFOLDER;
 
-createDistFolders(gameName, TEST_PNP_PDF_SUBFOLDER);
+createDistFolders(gameName, outFolder);
 
 (async () => {
     const imageTexts = await getImageTexts(gameFolder);
@@ -29,5 +30,5 @@ createDistFolders(gameName, TEST_PNP_PDF_SUBFOLDER);
 
     await renderTemplateCards(imageInfos, imageTexts, gameFolder, gameName);
 
-    buildPnpPdf(imageInfos, gameName, TEST_PNP_PDF_SUBFOLDER).catch((err) => console.log('Error:', err.message));
+    buildPnpPdf(imageInfos, gameName, outFolder).catch((err) => console.log('Error:', err.message));
 })();

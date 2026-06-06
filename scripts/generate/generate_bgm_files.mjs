@@ -13,13 +13,15 @@ import sharp from 'sharp';
 import { createDistFolders, getImageInfos, parseGeneratorArgs } from './shared.mjs';
 import { BGM_SUBFOLDER_BACKS, BGM_SUBFOLDER_FRONTS, DIST_DIR } from './config.mjs';
 
-const { gameFolder, gameName, imageFolderPath } = parseGeneratorArgs();
+const { gameFolder, gameName, imageFolderPath, outputSubfolder } = parseGeneratorArgs();
 
-const frontsFolder = path.join(DIST_DIR, gameName, BGM_SUBFOLDER_FRONTS);
-const backsFolder = path.join(DIST_DIR, gameName, BGM_SUBFOLDER_BACKS);
+const frontsSub = outputSubfolder ? `${outputSubfolder}/fronts` : BGM_SUBFOLDER_FRONTS;
+const backsSub = outputSubfolder ? `${outputSubfolder}/backs` : BGM_SUBFOLDER_BACKS;
+const frontsFolder = path.join(DIST_DIR, gameName, frontsSub);
+const backsFolder = path.join(DIST_DIR, gameName, backsSub);
 
-createDistFolders(gameName, BGM_SUBFOLDER_FRONTS);
-createDistFolders(gameName, BGM_SUBFOLDER_BACKS);
+createDistFolders(gameName, frontsSub);
+createDistFolders(gameName, backsSub);
 
 (async () => {
     console.time('Preparing images');
