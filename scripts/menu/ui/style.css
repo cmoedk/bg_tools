@@ -504,6 +504,13 @@ button.danger:hover { filter: brightness(1.08); }
 .ov-info .ov-desc { margin: 0; line-height: 1.5; }
 .ov-hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 
+/* Save indicator: plain text (no button/background), green when saved. */
+.save-indicator { font-size: 13px; font-weight: 500; margin-left: 4px; }
+.save-indicator.ok { color: var(--green); }
+.save-indicator.running { color: var(--muted); }
+/* Unsaved-edits asterisk next to the project name. */
+.ed-dirty { color: var(--muted); font-weight: 700; }
+
 /* ---- Left: project groups ---- */
 .project-group { display: flex; flex-direction: column; gap: 6px; }
 

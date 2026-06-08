@@ -2,8 +2,11 @@
 
 ## 5 June 2026
 
-- "Saved" info, after pressing Save, should appear next to the project name, f.ex. the_king_of_ragnarok. And instead of a button like look, style it without background-color, but with a green text color.
-- If the current file has been edited, but not saved, add an asterisk next to the project title (f.ex. the_king_of_ragnarok*)
+- ~~"Saved" info, after pressing Save, should appear next to the project name, f.ex. the_king_of_ragnarok. And instead of a button like look, style it without background-color, but with a green text color.~~
+- ~~If the current file has been edited, but not saved, add an asterisk next to the project title (f.ex. the_king_of_ragnarok*)~~
+- ~~The Browse button do not work, if Windows Explorer is not the main file manager (f.ex. when using FilePilot)~~
+- ~~In the run.cmd, check if bg_tools has been updated. Prompt the user, if there is a newer version, then run pnpm update.~~
+- ~~Make a "New" opgtroup in the file select element, where + New file live. Add options for creating .info.md, .cards.text.json5, .cards.json5, .changelog.md, .notes.md, /design (folder + card.html and the two css files) if they do not exist.~~
 
 - ~~Move the X (close editor) into the editor header (at the end of the Editor header line)~~
 - ~~The Images/Templates buttons toggle should be centered in the preview pane.~~

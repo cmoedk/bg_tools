@@ -78,7 +78,8 @@
                 <div class="view-head">
                     <div class="editor-info">
                         <span id="ed-status" class="status-chip"></span>
-                        <span id="ed-name" class="project-name"></span>
+                        <span id="ed-name" class="project-name"></span><span id="ed-dirty" class="ed-dirty"></span>
+                        <span id="save-status" class="save-indicator"></span>
                     </div>
                 </div>
                 <div class="editor-toolbar">
@@ -86,7 +87,6 @@
                     <button id="save-btn">Save</button>
                     <button id="rename-btn" class="ghost">Rename</button>
                     <button id="bump-btn" class="ghost hidden">Bump version</button>
-                    <span id="save-status" class="badge"></span>
                     <button id="delete-file-btn" class="danger" title="Delete file">🗑</button>
                 </div>
                 <textarea id="code" class="code-area" spellcheck="false" placeholder="Select a file…"></textarea>

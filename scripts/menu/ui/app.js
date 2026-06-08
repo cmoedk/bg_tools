@@ -4,6 +4,7 @@
 // Right: Actions (project/action view) or Preview (editor view).
 
 const NEW_FILE = '__new__';
+const CREATE_PREFIX = '__create__:'; // "New" group options that scaffold a standard project file
 const CARD_W = 750;   // card preview renders at the generator's true viewport, then scales
 const CARD_H = 1125;
 const ACTION_GROUP_ORDER = ['Rules', 'Images', 'Templates', 'Other'];
@@ -113,7 +114,7 @@ async function reloadCurrentFileFromDisk() {
     const data = await res.json();
     code.value = data.content;
     currentFileMtime = data.mtimeMs || 0;
-    dirty = false;
+    dirty = false; updateDirtyMark();
     lastTextKey = '';
     lastLineImg = '';
     setSaveStatus('');
@@ -749,7 +750,7 @@ async function openEditor() {
     el('ed-status').textContent = statusLabel(data.status);
     el('ed-name').textContent = data.name;
     renderFileSelect();
-    dirty = false;
+    dirty = false; updateDirtyMark();
     setView('editor');
     const def = files.find(f => f.default) || files[0];
     if (def) selectFile(def.path, def.lang || '');
@@ -798,12 +799,25 @@ function renderFileSelect() {
     [...new Set(files.filter(f => f.lang).map(f => f.lang))]
         .forEach(code => addGroup(langName(code), files.filter(f => f.lang === code)));
     addGroup('Misc.', files.filter(f => !f.lang && !isOfficialFile(f.path) && f.group !== 'template'));
-    // Idea projects are a single file — no "New file" option.
-    if (!currentProject || currentProject.status !== '1_idea') {
-        const nw = document.createElement('option');
-        nw.value = NEW_FILE;
-        nw.textContent = '＋ New file…';
-        sel.appendChild(nw);
+    // Idea projects are a single file — no "New" group.
+    if (currentProject && currentProject.status !== '1_idea') {
+        const og = document.createElement('optgroup');
+        og.label = 'New';
+        const opt = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; og.appendChild(o); };
+        opt(NEW_FILE, '＋ New file…');
+        // Offer the standard project files that don't exist yet.
+        const name = currentProject.name;
+        const have = new Set(files.filter(f => !f.lang).map(f => f.path));
+        const creatable = [
+            ['info', `${name}.info.md`, '＋ .info.md'],
+            ['cards', `${name}.cards.json5`, '＋ .cards.json5'],
+            ['cards-text', `${name}.cards.text.json5`, '＋ .cards.text.json5'],
+            ['changelog', `${name}.changelog.md`, '＋ .changelog.md'],
+            ['notes', `${name}.notes.md`, '＋ .notes.md'],
+        ];
+        creatable.forEach(([kind, fname, label]) => { if (!have.has(fname)) opt(`${CREATE_PREFIX}${kind}`, label); });
+        if (!files.some(f => f.path.startsWith('design/'))) opt(`${CREATE_PREFIX}design`, '＋ /design (card.html + css)');
+        sel.appendChild(og);
     }
 }
 
@@ -838,7 +852,7 @@ async function selectFile(path, lang = '') {
     lastCursorLine = -1;
     lastTextKey = '';
     lastLineImg = '';
-    dirty = false;
+    dirty = false; updateDirtyMark();
     setSaveStatus('');
     updateBumpButton();
     if (currentKind === 'html') {
@@ -888,6 +902,19 @@ function bumpVersion() {
     openModal({ title: 'Bump version', body: wrap, buttons: [btnCancel(), btnPrimary('Rename', doBump)] });
     setTimeout(() => input.focus(), 50);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doBump(); });
+}
+
+// "New" group: scaffold a standard project file (or the design folder) and open it.
+async function createOfficial(kind) {
+    const restoreSelect = () => { el('file-select').value = currentFilePath === null ? NEW_FILE : `${currentFileLang || ''}|${currentFilePath}`; };
+    const r = await fetch('/api/create-official', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedId, kind }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { openAlert('New file', d.error || 'Could not create the file.'); restoreSelect(); return; }
+    await reloadFiles(d.path, '');
+    selectFile(d.path, '');
 }
 
 // Load the cards that use this template (for the preview card selector).
@@ -945,7 +972,7 @@ function startNewFile() {
         currentKind = kindFromPath(name);
         currentJson5Mode = json5ModeForPath(name);
         lastTextKey = ''; lastLineImg = '';
-        dirty = true;
+        dirty = true; updateDirtyMark();
         setSaveStatus('');
         updateBumpButton();
         renderPreview();
@@ -975,7 +1002,7 @@ async function saveFile() {
     const data = await res.json();
     if (!res.ok) { setSaveStatus(''); setEditorError(data.error || 'Save failed.'); return false; }
     setSaveStatus('saved');
-    dirty = false;
+    dirty = false; updateDirtyMark();
     currentFileMtime = data.mtimeMs || 0;
     currentKind = kindFromPath(name);
     currentJson5Mode = json5ModeForPath(name);
@@ -1039,7 +1066,7 @@ async function deleteFile() {
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { openAlert('Delete file', d.error || 'Could not delete.'); return; }
-    dirty = false;
+    dirty = false; updateDirtyMark();
     await reloadFiles(null, '');
     const def = files.find(f => f.default) || files[0];
     if (def) selectFile(def.path, def.lang || '');
@@ -1526,7 +1553,7 @@ function guardUnsaved() {
             onDismiss: () => resolve(false),
             buttons: [
                 btnGhost('Cancel', () => { closeModal(); resolve(false); }),
-                btnGhost('Discard', () => { closeModal(); dirty = false; resolve(true); }),
+                btnGhost('Discard', () => { closeModal(); dirty = false; updateDirtyMark(); resolve(true); }),
                 btnPrimary('Save', async () => { if (await saveFile()) { closeModal(); resolve(true); } }),
             ],
         });
@@ -1572,9 +1599,13 @@ function openAlert(title, message) {
 // --- Status / console ---
 function setSaveStatus(state) {
     const b = el('save-status');
-    b.className = 'badge ' + (state === 'saved' ? 'ok' : state === 'saving' ? 'running' : '');
+    b.className = 'save-indicator ' + (state === 'saved' ? 'ok' : state === 'saving' ? 'running' : '');
     b.textContent = state === 'saved' ? 'Saved' : state === 'saving' ? 'Saving…' : '';
     if (state === 'saved') setTimeout(() => { if (b.textContent === 'Saved') setSaveStatus(''); }, 2000);
+}
+// Show an asterisk next to the project name while the open file has unsaved edits.
+function updateDirtyMark() {
+    el('ed-dirty').textContent = dirty ? '*' : '';
 }
 function setRunStatus(state) {
     const b = el('run-status');
@@ -1634,10 +1665,11 @@ el('file-select').addEventListener('change', async () => {
         return;
     }
     if (v === NEW_FILE) { startNewFile(); return; }
+    if (v.startsWith(CREATE_PREFIX)) { createOfficial(v.slice(CREATE_PREFIX.length)); return; }
     const i = v.indexOf('|');
     selectFile(v.slice(i + 1), v.slice(0, i));
 });
-code.addEventListener('input', () => { dirty = true; setSaveStatus(''); schedulePreview(); });
+code.addEventListener('input', () => { dirty = true; updateDirtyMark(); setSaveStatus(''); schedulePreview(); });
 code.addEventListener('keyup', scheduleCursorPreview);
 code.addEventListener('click', scheduleCursorPreview);
 code.addEventListener('scroll', () => {
@@ -1654,7 +1686,7 @@ code.addEventListener('keydown', (e) => {
         const s = code.selectionStart, en = code.selectionEnd;
         code.value = code.value.slice(0, s) + indent + code.value.slice(en);
         code.selectionStart = code.selectionEnd = s + indent.length;
-        dirty = true;
+        dirty = true; updateDirtyMark();
         setSaveStatus('');
         schedulePreview();
     }

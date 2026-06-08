@@ -1168,13 +1168,13 @@ const server = http.createServer(async (req, res) => {
             if (process.platform !== 'win32') {
                 return sendJson(res, 400, { error: 'The folder picker is only available on Windows.' });
             }
-            // A hidden TopMost owner form makes the dialog appear IN FRONT of the
-            // browser instead of behind it.
-            const ps = "Add-Type -AssemblyName System.Windows.Forms; " +
-                "$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; " +
-                "$d = New-Object System.Windows.Forms.FolderBrowserDialog; " +
-                "$d.Description = 'Choose a folder'; $d.ShowNewFolderButton = $true; " +
-                "if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.WriteLine($d.SelectedPath) }; $owner.Dispose()";
+            // Use the classic Shell COM folder picker (SHBrowseForFolder). Unlike the
+            // WinForms/Vista IFileDialog picker, it is rendered by the shell itself and
+            // keeps working when a third-party file manager (e.g. FilePilot) has taken
+            // over Explorer. BIF flags: 0x40 = new-folder button, 0x10 = edit box.
+            const ps = "$shell = New-Object -ComObject Shell.Application; " +
+                "$f = $shell.BrowseForFolder(0, 'Choose a folder', 0x40 -bor 0x10); " +
+                "if ($f -ne $null -and $f.Self.Path) { [Console]::Out.WriteLine($f.Self.Path) }";
             const child = spawn('powershell', ['-NoProfile', '-STA', '-Command', ps]);
             let out = '';
             child.stdout.on('data', (d) => { out += d.toString(); });
@@ -1350,6 +1350,36 @@ const server = http.createServer(async (req, res) => {
             const dest = path.join(designDir, name);
             if (!existsSync(dest)) await fs.writeFile(dest, await readDefaultCardHtml(), 'utf-8');
             return sendJson(res, 200, { ok: true, name });
+        }
+
+        // Create one of the standard "official" project files (or the design folder),
+        // seeded from its template, for the "New" group in the editor file list.
+        if (pathname === '/api/create-official' && req.method === 'POST') {
+            const body = JSON.parse(await readBody(req) || '{}');
+            const project = resolveProject(body.id);
+            if (!project || project.kind !== 'folder') return sendJson(res, 400, { error: 'Invalid project.' });
+            const name = project.name;
+            const kind = body.kind;
+            const tplText = async (f, fallback) => {
+                try { return await fs.readFile(path.join(TEMPLATES_DIR, f), 'utf-8'); } catch { return fallback; }
+            };
+            if (kind === 'design') {
+                await copyDesignTemplate(path.join(project.folderDir, 'design'), { onlyMissing: true });
+                return sendJson(res, 200, { ok: true, path: 'design/card.html' });
+            }
+            const specs = {
+                info: { rel: `${name}.info.md`, make: async () => infoSeed(name) },
+                cards: { rel: `${name}.cards.json5`, make: () => tplText('_template.cards.json5', '{\n}\n') },
+                'cards-text': { rel: `${name}.cards.text.json5`, make: () => tplText('_template.cards.text.json5', '{\n}\n') },
+                changelog: { rel: `${name}.changelog.md`, make: () => changelogSeed(name) },
+                notes: { rel: `${name}.notes.md`, make: async () => notesSeed(name) },
+            };
+            const spec = specs[kind];
+            if (!spec) return sendJson(res, 400, { error: 'Unknown file kind.' });
+            const abs = resolveProjectFile(project, spec.rel);
+            if (!abs) return sendJson(res, 400, { error: 'Invalid path.' });
+            if (!existsSync(abs)) await fs.writeFile(abs, await spec.make(), 'utf-8');
+            return sendJson(res, 200, { ok: true, path: spec.rel });
         }
 
         if (pathname === '/api/add-project' && req.method === 'POST') {
